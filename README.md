@@ -1,36 +1,25 @@
 # Agentic System Lab
 
-Small FastAPI prototype for a customer-support agent orchestrator.
+Small FastAPI prototype for agentic customer-support workflows.
 
-The project demonstrates an orchestrator-led architecture: the backend receives a
-support request, selects one or more specialist agents, chooses `single_agent`,
-`sequential`, or `parallel` execution, validates structured agent outputs, and
-returns one coherent JSON response.
+The main interview project in this branch is a multi-agent e-commerce return
+chatbot available at `POST /returns/chat`. It demonstrates routing, planning,
+Q&A response generation, backend tool proposals, session persistence, and safe
+refund validation.
 
-## Why Orchestration
+The repository also keeps the existing `/chat` support orchestrator endpoint for
+comparison.
 
-A fixed multi-agent pipeline runs the same steps every time:
+## Return Chatbot Flow
 
-`routing -> return planner -> tools -> answer`
+`request -> Routing Agent -> Planner Agent -> validated backend tools -> Q&A Agent`
 
-That is easy to test, but wasteful and rigid. A shipping-only question still
-passes through return logic, and a mixed payment/return request needs custom
-branching.
-
-This prototype uses a central orchestrator instead:
-
-`request -> orchestrator decision -> selected specialists -> aggregation`
-
-The orchestrator owns workflow control. Domain agents stay small and stateless.
-The backend owns execution and validation.
-
-## Specialists
-
-- `return_agent`: return and refund eligibility
-- `shipping_agent`: package status, delivery delay, tracking
-- `payment_agent`: duplicate charge, refund timeline, payment questions
-- `account_agent`: profile, address, login questions
-- `escalation_agent`: safe human handoff when confidence is low or changes are sensitive
+- `RoutingAgent`: classifies intent, extracts `order_id`, `item_id`, return
+  reason, and refund request state.
+- `PlannerAgent`: checks order data and return policy, then proposes tool calls.
+- `QAAgent`: turns planner decisions and tool results into customer-facing
+  support replies.
+- `BackendTools`: validates every proposed tool call before execution.
 
 ## Run
 
@@ -39,29 +28,30 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-Then post to `http://127.0.0.1:8000/chat`:
+Then post to `http://127.0.0.1:8000/returns/chat`:
 
 ```json
 {
   "session_id": "demo",
   "user_id": "user-1",
-  "message": "I was charged twice and I also want to return the shoes."
+  "message": "I want to return item-1 from order-1001 because it is damaged and get a refund"
 }
 ```
 
-## Response Shape
+## Safety Boundary
 
-The response includes:
+The LLM-style agents only propose tool calls. Refund execution is guarded by
+backend validation in `app/tools.py`, which verifies:
 
-- `selected_agents`
-- `execution_plan`
-- `agent_results`
-- `final_response`
-- `reasoning`
-- `trace`
+- the order exists
+- the authenticated user owns the order
+- the item belongs to the order
+- the item is refundable
+- the refund amount matches order data
+- the return policy allows the refund
 
-Agents propose actions. The backend only auto-executes validated safe actions,
-such as support ticket creation. Unsafe payment/account changes remain proposed.
+Unsafe proposals are returned as blocked tool results and no refund record is
+created.
 
 ## Tests
 
@@ -70,3 +60,9 @@ pytest -q
 ```
 
 Coverage includes routing, aggregation, policy checks, and backend refund safety.
+
+## Docs
+
+- `docs/architecture.md`: architecture, sequence diagram, safety boundary
+- `docs/example_conversations.md`: example single, sequential, and parallel traces
+- `docs/project_notes.md`: rationale, current no-LLM runtime model, and workflow notes

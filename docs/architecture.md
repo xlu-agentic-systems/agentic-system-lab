@@ -1,6 +1,32 @@
 # Architecture
 
-## Core Flow
+## Return Chatbot Core Flow
+
+The return chatbot is implemented in `app/return_service.py` and exposed at
+`POST /returns/chat`.
+
+1. Load session state from `JsonSessionStore`.
+2. Run `RoutingAgent` to classify intent and extract structured fields.
+3. Ask for clarification if order ID, item ID, or return reason is missing.
+4. Run `PlannerAgent` to check order ownership, item data, and return policy.
+5. Execute proposed tool calls through backend validation.
+6. Run `QAAgent` to explain approval, rejection, escalation, or next steps.
+7. Save updated session state.
+
+Agents are logical roles. They are instantiated per service process and do not
+hold user session state. Session context is keyed by `session_id` and loaded on
+each request.
+
+## Safety
+
+Refunds are unsafe writes. The planner can propose `issue_refund`, but
+`validate_and_execute_tool` independently verifies order existence, ownership,
+item membership, refundable status, exact refund amount, and policy eligibility.
+
+If validation fails, the tool result has `executed=false` and no refund record is
+created.
+
+## Legacy Orchestrator
 
 The orchestrator is implemented in `app/service.py`. It loads session state,
 routes the message, builds an execution plan, runs specialist agents, optionally

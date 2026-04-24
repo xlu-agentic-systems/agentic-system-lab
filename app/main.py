@@ -5,6 +5,8 @@ import logging
 from fastapi import FastAPI
 
 from app.models import ConversationRequest, ConversationResponse
+from app.return_models import ReturnConversationRequest, ReturnConversationResponse
+from app.return_service import ReturnConversationService
 from app.service import ConversationService
 
 
@@ -15,6 +17,7 @@ logging.basicConfig(
 
 app = FastAPI(title="Customer Support Agent Orchestrator")
 service = ConversationService()
+return_service = ReturnConversationService()
 
 
 @app.get("/health")
@@ -25,3 +28,8 @@ async def health() -> dict[str, str]:
 @app.post("/chat", response_model=ConversationResponse)
 async def chat(request: ConversationRequest) -> ConversationResponse:
     return await service.handle_message(request)
+
+
+@app.post("/returns/chat", response_model=ReturnConversationResponse)
+async def returns_chat(request: ReturnConversationRequest) -> ReturnConversationResponse:
+    return await return_service.handle_message(request)
