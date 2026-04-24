@@ -7,6 +7,10 @@ chatbot available at `POST /returns/chat`. It demonstrates routing, planning,
 Q&A response generation, backend tool proposals, session persistence, and safe
 refund validation.
 
+The runtime agents call OpenAI models through the Responses API with Pydantic
+structured outputs. Unit tests inject `RuleBasedLlmClient` so tests stay
+deterministic and do not require network access.
+
 The repository also keeps the existing `/chat` support orchestrator endpoint for
 comparison.
 
@@ -25,6 +29,8 @@ comparison.
 
 ```bash
 pip install -e ".[dev]"
+export OPENAI_API_KEY="..."
+# optional: export OPENAI_MODEL="gpt-5.5"
 uvicorn app.main:app --reload
 ```
 
@@ -40,7 +46,7 @@ Then post to `http://127.0.0.1:8000/returns/chat`:
 
 ## Safety Boundary
 
-The LLM-style agents only propose tool calls. Refund execution is guarded by
+The LLM agents only propose tool calls. Refund execution is guarded by
 backend validation in `app/tools.py`, which verifies:
 
 - the order exists
@@ -65,4 +71,4 @@ Coverage includes routing, aggregation, policy checks, and backend refund safety
 
 - `docs/architecture.md`: architecture, sequence diagram, safety boundary
 - `docs/example_conversations.md`: example single, sequential, and parallel traces
-- `docs/project_notes.md`: rationale, current no-LLM runtime model, and workflow notes
+- `docs/project_notes.md`: rationale, LLM runtime model, and workflow notes

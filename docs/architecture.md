@@ -6,16 +6,20 @@ The return chatbot is implemented in `app/return_service.py` and exposed at
 `POST /returns/chat`.
 
 1. Load session state from `JsonSessionStore`.
-2. Run `RoutingAgent` to classify intent and extract structured fields.
+2. Run LLM-backed `RoutingAgent` to classify intent and extract structured fields.
 3. Ask for clarification if order ID, item ID, or return reason is missing.
-4. Run `PlannerAgent` to check order ownership, item data, and return policy.
+4. Run LLM-backed `PlannerAgent` with backend order, item, and policy facts.
 5. Execute proposed tool calls through backend validation.
-6. Run `QAAgent` to explain approval, rejection, escalation, or next steps.
+6. Run LLM-backed `QAAgent` to explain approval, rejection, escalation, or next steps.
 7. Save updated session state.
 
-Agents are logical roles. They are instantiated per service process and do not
-hold user session state. Session context is keyed by `session_id` and loaded on
-each request.
+Agents are logical roles that call OpenAI through `OpenAILlmClient`. They are
+instantiated per service process and do not hold user session state. Session
+context is keyed by `session_id` and loaded on each request.
+
+Structured model outputs are parsed into Pydantic models, so the backend receives
+typed `RoutingOutput`, `PlannerOutput`, `AgentResult`, and `QAOutput` objects
+instead of free-form text.
 
 ## Safety
 
@@ -33,8 +37,9 @@ routes the message, builds an execution plan, runs specialist agents, optionally
 adds escalation, validates backend actions, aggregates the final answer, and
 saves session state.
 
-Domain agents are stateless. They receive `message`, `user_id`, and the loaded
-session context, then return a Pydantic `AgentResult`.
+Domain agents are stateless. They receive `message`, `user_id`, the loaded
+session context, and relevant backend facts, then use an LLM call to return a
+Pydantic `AgentResult`.
 
 ## Sequence Diagram
 

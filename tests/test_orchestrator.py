@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 
+from app.llm import RuleBasedLlmClient
 from app.models import ConversationRequest
 from app.service import ConversationService
 from app.session_store import JsonSessionStore
@@ -11,7 +12,10 @@ def run(coro):
 
 
 def service(tmp_path: Path) -> ConversationService:
-    return ConversationService(session_store=JsonSessionStore(tmp_path / "sessions.json"))
+    return ConversationService(
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        llm_client=RuleBasedLlmClient(),
+    )
 
 
 def test_parallel_payment_and_return_routing(tmp_path: Path) -> None:

@@ -2,20 +2,23 @@
 
 ## Current Runtime Model
 
-This prototype does not call an LLM. Both local agent flows are deterministic
-Python classes that simulate specialist behavior and return structured Pydantic
-models:
+This prototype now calls OpenAI models at runtime. Both local agent flows use
+`OpenAILlmClient`, which calls the Responses API and parses Pydantic structured
+outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
 - `POST /chat`: an orchestrator-led support flow
 
-That is intentional for the interview-focused version:
+Set `OPENAI_API_KEY` before running the API. `OPENAI_MODEL` defaults to
+`gpt-5.5` and can be overridden for evals or cost/latency tradeoffs.
 
-- The orchestration pattern is visible without API keys or network calls.
+Unit tests inject `RuleBasedLlmClient` instead of calling the network. That is
+intentional for the interview-focused version:
+
+- The production code path is genuinely LLM-backed.
 - Routing and aggregation are deterministic enough for unit tests.
 - The backend control boundary is explicit.
-- A future LLM adapter can replace the deterministic agent logic without
-  changing the orchestration contract.
+- The same Pydantic contracts validate model outputs and test doubles.
 
 ## Where Architecture Notes Belong
 
@@ -65,12 +68,13 @@ The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
 each other, execute irreversible tools, or own session state.
 
-## Future LLM Integration
+## LLM Integration
 
-If this becomes an LLM-backed system, keep the same interfaces:
+The LLM receives:
 
-- Input: `message`, `user_id`, loaded session context, and relevant tool facts.
-- Output: validated `AgentResult` objects.
+- Input: `message`, `user_id`, loaded session context, and relevant backend/tool facts.
+- Output: validated Pydantic objects such as `RoutingOutput`, `PlannerOutput`,
+  `AgentResult`, and `QAOutput`.
 - Execution: backend invokes tools after policy validation.
 
 The LLM should help classify, summarize, and reason over ambiguous customer

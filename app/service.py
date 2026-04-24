@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 
+from app.llm import LlmClient, OpenAILlmClient
 from app.models import (
     AgentName,
     AgentResult,
@@ -12,6 +13,8 @@ from app.models import (
     ConversationResponse,
     ExecutionPlan,
     ExecutionStep,
+    OrchestratorDecision,
+    ProposedAction,
     ReturnContext,
     TraceEvent,
 )
@@ -28,8 +31,9 @@ ITEM_RE = re.compile(r"\bitem-\d+\b", re.IGNORECASE)
 class ReturnAgent:
     name = "return_agent"
 
-    def __init__(self, tools: BackendTools) -> None:
+    def __init__(self, tools: BackendTools, llm_client: LlmClient) -> None:
         self.tools = tools
+        self.llm_client = llm_client
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         resolved = await self.tools.resolve_order_item(
@@ -38,168 +42,99 @@ class ReturnAgent:
             item_id=context.item_id,
             product_hint=context.product_hint,
         )
-        if "error" in resolved:
-            return AgentResult(
-                agent=self.name,
-                confidence=0.35,
-                summary="I could not identify the exact item to evaluate for return eligibility.",
-                details=resolved,
-                needs_escalation=True,
-                reason_codes=[resolved["error"]],
-            )
-        order = resolved["order"]
-        item = resolved["item"]
-        product = resolved["product"]
-        eligibility = await self.tools.check_return_eligibility(order["order_id"], item["item_id"])
-        if eligibility["eligible"]:
-            amount = eligibility["amount"]
-            return AgentResult(
-                agent=self.name,
-                confidence=0.92,
-                summary=f"{product['name']} is eligible for return. The refundable amount is ${amount}.",
-                details={"resolved": resolved, "eligibility": eligibility},
-                proposed_actions=[],
-                reason_codes=["return_eligible"],
-            )
-        return AgentResult(
-            agent=self.name,
-            confidence=0.88,
-            summary=(
-                f"{product['name']} is not currently eligible for return: "
-                f"{', '.join(eligibility['reason_codes'])}."
+        eligibility = None
+        if "error" not in resolved:
+            order = resolved["order"]
+            item = resolved["item"]
+            eligibility = await self.tools.check_return_eligibility(order["order_id"], item["item_id"])
+        return await self.llm_client.parse(
+            task_name=self.name,
+            system_prompt=_specialist_prompt(
+                self.name,
+                "Assess return eligibility from backend facts. Propose a return action only if eligible. "
+                "Do not claim that a refund or return has been executed.",
             ),
-            details={"resolved": resolved, "eligibility": eligibility},
-            needs_escalation="order_not_delivered" in eligibility["reason_codes"],
-            reason_codes=eligibility["reason_codes"],
+            user_payload={"message": message, "context": context.model_dump(), "resolved": resolved, "eligibility": eligibility},
+            response_model=AgentResult,
         )
 
 
 class ShippingAgent:
     name = "shipping_agent"
 
-    def __init__(self, tools: BackendTools) -> None:
+    def __init__(self, tools: BackendTools, llm_client: LlmClient) -> None:
         self.tools = tools
+        self.llm_client = llm_client
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         status = await self.tools.get_shipping_status(user_id, context.order_id)
-        if "error" in status:
-            return AgentResult(
-                agent=self.name,
-                confidence=0.4,
-                summary="I could not find a shipment for this request.",
-                details=status,
-                needs_escalation=True,
-                reason_codes=[status["error"]],
-            )
-        if status["status"] == "delayed":
-            return AgentResult(
-                agent=self.name,
-                confidence=0.9,
-                summary=(
-                    f"Order {status['order_id']} is delayed with {status['carrier']}. "
-                    f"Latest update: {status['last_update']}"
-                ),
-                details=status,
-                needs_escalation=True,
-                reason_codes=["shipment_delayed"],
-            )
-        return AgentResult(
-            agent=self.name,
-            confidence=0.9,
-            summary=(
-                f"Order {status['order_id']} is {status['status']} with {status['carrier']} "
-                f"tracking {status['tracking_number']}."
+        return await self.llm_client.parse(
+            task_name=self.name,
+            system_prompt=_specialist_prompt(
+                self.name,
+                "Assess package status from backend shipping facts. Escalate delayed, lost, or missing shipments.",
             ),
-            details=status,
-            reason_codes=[f"shipment_{status['status']}"],
+            user_payload={"message": message, "context": context.model_dump(), "shipping_status": status},
+            response_model=AgentResult,
         )
 
 
 class PaymentAgent:
     name = "payment_agent"
 
-    def __init__(self, tools: BackendTools) -> None:
+    def __init__(self, tools: BackendTools, llm_client: LlmClient) -> None:
         self.tools = tools
+        self.llm_client = llm_client
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         text = message.lower()
+        timeline = None
         if any(term in text for term in ("timeline", "how long", "when will", "refund status")):
             timeline = await self.tools.get_refund_timeline()
-            return AgentResult(
-                agent=self.name,
-                confidence=0.86,
-                summary=timeline["timeline"],
-                details=timeline,
-                reason_codes=["refund_timeline"],
-            )
         duplicates = await self.tools.find_duplicate_charges(user_id, context.order_id)
-        if duplicates["duplicates"]:
-            duplicate = duplicates["duplicates"][0]
-            extra_payment = duplicate[1]
-            from app.models import ProposedAction
-
-            return AgentResult(
-                agent=self.name,
-                confidence=0.93,
-                summary=(
-                    f"I found a likely duplicate charge for order {extra_payment['order_id']} "
-                    f"in the amount of ${extra_payment['amount']}."
-                ),
-                details=duplicates,
-                proposed_actions=[
-                    ProposedAction(
-                        name="refund_duplicate_charge",
-                        args={"payment_id": extra_payment["payment_id"], "amount": extra_payment["amount"]},
-                        safety="unsafe_write",
-                        requires_approval=True,
-                        reason="Refunding a payment changes customer funds and needs approval.",
-                    )
-                ],
-                reason_codes=["duplicate_charge_found"],
-            )
-        return AgentResult(
-            agent=self.name,
-            confidence=0.72,
-            summary="I did not find a duplicate captured charge in the available payment records.",
-            details=duplicates,
-            reason_codes=["duplicate_charge_not_found"],
+        return await self.llm_client.parse(
+            task_name=self.name,
+            system_prompt=_specialist_prompt(
+                self.name,
+                "Assess payment facts. Unsafe payment changes may only be proposed, never described as executed. "
+                "If duplicate charges are present, propose refund_duplicate_charge with requires_approval=true.",
+            ),
+            user_payload={
+                "message": message,
+                "context": context.model_dump(),
+                "duplicate_charge_result": duplicates,
+                "refund_timeline": timeline,
+            },
+            response_model=AgentResult,
         )
 
 
 class AccountAgent:
     name = "account_agent"
 
-    def __init__(self, tools: BackendTools) -> None:
+    def __init__(self, tools: BackendTools, llm_client: LlmClient) -> None:
         self.tools = tools
+        self.llm_client = llm_client
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         profile = await self.tools.get_account_profile(user_id)
-        if "error" in profile:
-            return AgentResult(
-                agent=self.name,
-                confidence=0.35,
-                summary="I could not load the account profile.",
-                details=profile,
-                needs_escalation=True,
-                reason_codes=[profile["error"]],
-            )
-        text = message.lower()
-        sensitive = any(term in text for term in ("address", "password", "login", "email", "payment method"))
-        return AgentResult(
-            agent=self.name,
-            confidence=0.82,
-            summary=(
-                f"The account on file is {profile['name']} with email {profile['email']}. "
-                "Sensitive profile changes require verification."
+        return await self.llm_client.parse(
+            task_name=self.name,
+            system_prompt=_specialist_prompt(
+                self.name,
+                "Assess account/profile questions. Sensitive account or payment-method changes require escalation "
+                "and identity verification; do not claim changes were made.",
             ),
-            details={"profile": profile, "sensitive_change_requested": sensitive},
-            needs_escalation=sensitive,
-            reason_codes=["sensitive_account_change"] if sensitive else ["account_loaded"],
+            user_payload={"message": message, "context": context.model_dump(), "profile": profile},
+            response_model=AgentResult,
         )
 
 
 class EscalationAgent:
     name = "escalation_agent"
+
+    def __init__(self, llm_client: LlmClient) -> None:
+        self.llm_client = llm_client
 
     async def run(
         self,
@@ -208,22 +143,29 @@ class EscalationAgent:
         context: ReturnContext,
         prior_results: list[AgentResult],
     ) -> AgentResult:
-        from app.models import ProposedAction
-
         low_confidence = [result.agent for result in prior_results if result.confidence < 0.6]
         needs_escalation = [result.agent for result in prior_results if result.needs_escalation]
         reasons = [code for result in prior_results for code in result.reason_codes]
         reason = f"Customer request: {message}; reason codes: {', '.join(reasons) or 'unknown'}"
-        return AgentResult(
-            agent=self.name,
-            confidence=0.9,
-            summary="A human support ticket should be created for this request.",
-            details={
+        result = await self.llm_client.parse(
+            task_name=self.name,
+            system_prompt=_specialist_prompt(
+                self.name,
+                "Decide how to explain a human escalation. If escalation is needed, propose create_support_ticket "
+                "with safety=safe_write and requires_approval=false.",
+            ),
+            user_payload={
+                "message": message,
+                "context": context.model_dump(),
                 "low_confidence_agents": low_confidence,
                 "escalating_agents": needs_escalation,
-                "prior_reason_codes": reasons,
+                "prior_results": [result.model_dump(mode="json") for result in prior_results],
+                "ticket_reason": reason,
             },
-            proposed_actions=[
+            response_model=AgentResult,
+        )
+        if not any(action.name == "create_support_ticket" for action in result.proposed_actions):
+            result.proposed_actions.append(
                 ProposedAction(
                     name="create_support_ticket",
                     args={"reason": reason},
@@ -231,10 +173,8 @@ class EscalationAgent:
                     requires_approval=False,
                     reason="The orchestrator determined this request needs human review.",
                 )
-            ],
-            needs_escalation=True,
-            reason_codes=["human_ticket_recommended"],
-        )
+            )
+        return result
 
 
 class ConversationService:
@@ -243,32 +183,46 @@ class ConversationService:
         *,
         session_store: JsonSessionStore | None = None,
         tools: BackendTools | None = None,
+        llm_client: LlmClient | None = None,
     ) -> None:
         self.session_store = session_store or JsonSessionStore()
         self.tools = tools or BackendTools()
+        self.llm_client = llm_client or OpenAILlmClient()
         self.agent_map = {
-            "return_agent": ReturnAgent(self.tools),
-            "shipping_agent": ShippingAgent(self.tools),
-            "payment_agent": PaymentAgent(self.tools),
-            "account_agent": AccountAgent(self.tools),
-            "escalation_agent": EscalationAgent(),
+            "return_agent": ReturnAgent(self.tools, self.llm_client),
+            "shipping_agent": ShippingAgent(self.tools, self.llm_client),
+            "payment_agent": PaymentAgent(self.tools, self.llm_client),
+            "account_agent": AccountAgent(self.tools, self.llm_client),
+            "escalation_agent": EscalationAgent(self.llm_client),
         }
 
     async def handle_message(self, request: ConversationRequest) -> ConversationResponse:
         trace: list[TraceEvent] = []
         state = await self.session_store.load(request.session_id, request.user_id)
         state.history.append(ChatMessage(role="user", content=request.message))
-        context = _merge_context(state.context, request.message)
+        base_context = _merge_context(state.context, request.message)
+        decision = await self._route_with_llm(request.message, base_context, state.history)
+        context = _merge_context(base_context, request.message, decision.extracted_context)
         state.context = context
-        trace.append(_trace("context", "Loaded isolated session context.", context.model_dump()))
+        trace.append(
+            _trace(
+                "context",
+                "Loaded isolated session context and merged LLM-extracted fields.",
+                context.model_dump(),
+            )
+        )
 
-        selected_agents = self._select_agents(request.message)
-        plan = self._build_execution_plan(request.message, selected_agents)
+        selected_agents = _normalize_selected_agents(decision.selected_agents)
+        plan = self._build_execution_plan(request.message, selected_agents, decision.execution_mode)
         trace.append(
             _trace(
                 "routing",
-                "Orchestrator selected specialist agents and execution mode.",
-                {"selected_agents": selected_agents, "mode": plan.mode},
+                "LLM orchestrator selected specialist agents and execution mode.",
+                {
+                    "selected_agents": selected_agents,
+                    "mode": plan.mode,
+                    "llm_reasoning": decision.reasoning,
+                },
             )
         )
         logger.info(
@@ -307,6 +261,29 @@ class ConversationService:
             trace=trace,
         )
 
+    async def _route_with_llm(
+        self,
+        message: str,
+        context: ReturnContext,
+        history: list[ChatMessage],
+    ) -> OrchestratorDecision:
+        return await self.llm_client.parse(
+            task_name="orchestrator_routing",
+            system_prompt=(
+                "You are the orchestrator for a customer-support agent system. Select one or more "
+                "specialist agents from return_agent, shipping_agent, payment_agent, account_agent, "
+                "and escalation_agent. Choose execution_mode as single_agent, sequential, or parallel. "
+                "Extract obvious order_id, item_id, and product_hint values. Escalate unknown, low confidence, "
+                "or sensitive account/payment-change requests. Return only the structured output."
+            ),
+            user_payload={
+                "message": message,
+                "current_context": context.model_dump(),
+                "recent_history": [item.model_dump(mode="json") for item in history[-6:]],
+            },
+            response_model=OrchestratorDecision,
+        )
+
     def _select_agents(self, message: str) -> list[AgentName]:
         text = message.lower()
         selected: list[AgentName] = []
@@ -322,7 +299,12 @@ class ConversationService:
             selected.append("escalation_agent")
         return selected
 
-    def _build_execution_plan(self, message: str, selected_agents: list[AgentName]) -> ExecutionPlan:
+    def _build_execution_plan(
+        self,
+        message: str,
+        selected_agents: list[AgentName],
+        requested_mode: str,
+    ) -> ExecutionPlan:
         if selected_agents == ["escalation_agent"]:
             return ExecutionPlan(
                 mode="single_agent",
@@ -335,7 +317,7 @@ class ConversationService:
                 steps=[ExecutionStep(step=1, agents=selected_agents, mode="single_agent", reason="Only one domain is needed.")],
                 reason="The request maps to a single specialist domain.",
             )
-        if _requires_sequential(message, selected_agents):
+        if requested_mode == "sequential" or _requires_sequential(message, selected_agents):
             return ExecutionPlan(
                 mode="sequential",
                 steps=[
@@ -343,6 +325,15 @@ class ConversationService:
                     for index, agent in enumerate(selected_agents)
                 ],
                 reason="The request contains a dependency or sensitive change, so agents run in order.",
+            )
+        if requested_mode == "single_agent":
+            return ExecutionPlan(
+                mode="sequential",
+                steps=[
+                    ExecutionStep(step=index + 1, agents=[agent], mode="single_agent", reason="LLM selected multiple agents; backend runs them sequentially to preserve a valid plan.")
+                    for index, agent in enumerate(selected_agents)
+                ],
+                reason="Multiple selected agents cannot run as single_agent, so the backend converted the plan to sequential.",
             )
         return ExecutionPlan(
             mode="parallel",
@@ -382,8 +373,11 @@ class ConversationService:
     ) -> AgentResult:
         instance = self.agent_map[agent]
         if agent == "escalation_agent":
-            return await instance.run(message, user_id, context, prior_results)
-        return await instance.run(message, user_id, context)
+            result = await instance.run(message, user_id, context, prior_results)
+        else:
+            result = await instance.run(message, user_id, context)
+        result.agent = agent
+        return result
 
     async def _maybe_escalate(
         self,
@@ -426,8 +420,18 @@ class ConversationService:
                 )
 
 
-def _merge_context(previous: ReturnContext, message: str) -> ReturnContext:
+def _merge_context(
+    previous: ReturnContext,
+    message: str,
+    llm_context: ReturnContext | None = None,
+) -> ReturnContext:
     context = previous.model_copy()
+    if llm_context:
+        for field in ("order_id", "item_id", "return_reason", "product_hint"):
+            value = getattr(llm_context, field)
+            if value:
+                setattr(context, field, value)
+        context.refund_requested = context.refund_requested or llm_context.refund_requested
     order_match = ORDER_RE.search(message)
     item_match = ITEM_RE.search(message)
     if order_match:
@@ -438,6 +442,24 @@ def _merge_context(previous: ReturnContext, message: str) -> ReturnContext:
     if product_hint:
         context.product_hint = product_hint
     return context
+
+
+def _normalize_selected_agents(selected_agents: list[AgentName]) -> list[AgentName]:
+    normalized: list[AgentName] = []
+    for agent in selected_agents:
+        if agent not in normalized:
+            normalized.append(agent)
+    return normalized or ["escalation_agent"]
+
+
+def _specialist_prompt(agent_name: str, role_guidance: str) -> str:
+    return (
+        f"You are {agent_name} in a customer-support agent system. {role_guidance} "
+        "Return an AgentResult. Keep details grounded only in provided backend facts. "
+        "Use confidence between 0 and 1. Set needs_escalation=true for low confidence, "
+        "sensitive changes, missing records, disagreement, or human-review cases. "
+        "No irreversible actions are executed by agents; agents only propose actions."
+    )
 
 
 def _extract_product_hint(message: str) -> str | None:

@@ -1,57 +1,57 @@
 from __future__ import annotations
 
 import logging
-import re
-from decimal import Decimal
 
 from app.catalog import Catalog, catalog
+from app.llm import LlmClient
 from app.models import (
     PlannerOutput,
     ReturnContext,
     RoutingOutput,
     SessionState,
     ToolCallProposal,
+    ToolExecutionResult,
 )
 from app.policy import check_return_policy
+from app.return_models import QAOutput
 
 
 logger = logging.getLogger(__name__)
-ORDER_RE = re.compile(r"\border-\d+\b", re.IGNORECASE)
-ITEM_RE = re.compile(r"\bitem-\d+\b", re.IGNORECASE)
 
 
 class RoutingAgent:
+    def __init__(self, llm_client: LlmClient) -> None:
+        self.llm_client = llm_client
+
     async def run(self, message: str, state: SessionState) -> RoutingOutput:
-        text = message.lower()
-        extracted = state.context.model_copy()
-        order_match = ORDER_RE.search(message)
-        item_match = ITEM_RE.search(message)
-
-        if order_match:
-            extracted.order_id = order_match.group(0).lower()
-        if item_match:
-            extracted.item_id = item_match.group(0).lower()
-        reason = _extract_reason(text)
-        if reason:
-            extracted.return_reason = reason
-        if any(term in text for term in ("refund", "return", "money back", "reimburse")):
-            extracted.refund_requested = True
-
-        intent = _classify_intent(text)
-        missing_fields = _missing_fields(intent, extracted)
-        output = RoutingOutput(
-            intent=intent,
-            extracted_fields=extracted,
-            missing_fields=missing_fields,
-            clarification_question=_clarification_question(missing_fields),
+        output = await self.llm_client.parse(
+            task_name="return_routing_agent",
+            system_prompt=(
+                "You are the Routing Agent for an e-commerce return chatbot. Classify intent and "
+                "extract useful fields from the customer message and session context. Valid intents "
+                "are return_request, return_policy_question, refund_status, and unknown. For a "
+                "return_request, mark order_id, item_id, and return_reason as missing when absent. "
+                "Ask one concise clarification question if required fields are missing. Return only "
+                "the structured RoutingOutput."
+            ),
+            user_payload={
+                "message": message,
+                "current_session_context": state.context.model_dump(),
+                "recent_history": [item.model_dump(mode="json") for item in state.history[-6:]],
+            },
+            response_model=RoutingOutput,
         )
+        output = _normalize_routing_output(output, state.context)
         logger.info("return routing decision: %s", output.model_dump(mode="json"))
         return output
 
 
 class PlannerAgent:
-    def __init__(self, domain_catalog: Catalog = catalog) -> None:
+    def __init__(self, domain_catalog: Catalog = catalog, llm_client: LlmClient | None = None) -> None:
+        if llm_client is None:
+            raise ValueError("PlannerAgent requires an LLM client")
         self.catalog = domain_catalog
+        self.llm_client = llm_client
 
     async def run(self, routing: RoutingOutput, user_id: str) -> PlannerOutput:
         if routing.missing_fields:
@@ -62,214 +62,166 @@ class PlannerAgent:
                 proposed_tool_calls=[],
             )
 
-        context = routing.extracted_fields
-        if routing.intent == "return_policy_question":
-            return self._policy_plan(context)
-        if routing.intent != "return_request":
-            return PlannerOutput(
-                status="needs_clarification",
-                reason_codes=["unsupported_intent"],
-                explanation="I can help with return and refund requests. Please share the order and item.",
-                proposed_tool_calls=[],
-            )
+        facts = _load_planner_facts(self.catalog, routing.extracted_fields, user_id)
+        output = await self.llm_client.parse(
+            task_name="return_planner_agent",
+            system_prompt=(
+                "You are the Planner Agent for an e-commerce return chatbot. Use only the provided "
+                "backend facts and policy facts. Decide whether the request is approved, rejected, "
+                "needs clarification, or should be escalated. You may propose backend tool calls, "
+                "including issue_refund, but you must not claim unsafe writes have executed. "
+                "Use issue_refund only when backend facts show eligibility and include the exact "
+                "refund amount from eligibility.amount. Return only the structured PlannerOutput."
+            ),
+            user_payload={
+                "user_id": user_id,
+                "routing": routing.model_dump(mode="json"),
+                "backend_facts": facts,
+            },
+            response_model=PlannerOutput,
+        )
+        output = _normalize_planner_output(output, routing, facts)
+        logger.info("return planner decision: %s", output.model_dump(mode="json"))
+        return output
 
-        assert context.order_id is not None
-        assert context.item_id is not None
-        order = self.catalog.get_order(context.order_id)
-        if order is None:
-            return PlannerOutput(
-                status="rejected",
-                reason_codes=["order_not_found"],
-                explanation="The order was not found.",
-                proposed_tool_calls=[
-                    ToolCallProposal(
-                        name="create_support_ticket",
-                        args={"reason": f"Return request for unknown order {context.order_id}"},
-                        safety="safe_write",
-                        reason="A human support agent should inspect the missing order reference.",
-                    )
-                ],
-            )
-        if order.user_id != user_id:
-            return PlannerOutput(
-                status="rejected",
-                reason_codes=["order_not_owned_by_user"],
-                explanation="The requested order does not belong to the authenticated user.",
-                proposed_tool_calls=[],
-            )
 
-        item = next((candidate for candidate in order.items if candidate.item_id == context.item_id), None)
-        if item is None:
-            return PlannerOutput(
-                status="rejected",
-                reason_codes=["item_not_found"],
-                explanation="The item was not found on that order.",
-                proposed_tool_calls=[],
-            )
+class QAAgent:
+    def __init__(self, llm_client: LlmClient) -> None:
+        self.llm_client = llm_client
 
-        product = self.catalog.get_product(item.product_id)
-        category = product.category if product else "unknown"
-        eligibility = check_return_policy(self.catalog, context.order_id, context.item_id)
-        read_calls = [
+    async def run(
+        self,
+        routing: RoutingOutput,
+        planner: PlannerOutput,
+        tool_results: list[ToolExecutionResult],
+    ) -> str:
+        output = await self.llm_client.parse(
+            task_name="return_qa_agent",
+            system_prompt=(
+                "You are the Q&A Agent for an e-commerce return chatbot. Write the final customer "
+                "message from the routing output, planner decision, and backend tool results. Be "
+                "polite and concise. Do not invent policy details. If an unsafe tool proposal was "
+                "blocked or not executed, clearly say no refund was issued."
+            ),
+            user_payload={
+                "routing": routing.model_dump(mode="json"),
+                "planner": planner.model_dump(mode="json"),
+                "tool_results": [result.model_dump(mode="json") for result in tool_results],
+            },
+            response_model=QAOutput,
+        )
+        return output.response
+
+
+def _normalize_routing_output(output: RoutingOutput, previous_context: ReturnContext) -> RoutingOutput:
+    context = previous_context.model_copy(update=output.extracted_fields.model_dump(exclude_none=True))
+    missing_fields: list[str] = []
+    if output.intent == "return_request":
+        if not context.order_id:
+            missing_fields.append("order_id")
+        if not context.item_id:
+            missing_fields.append("item_id")
+        if not context.return_reason:
+            missing_fields.append("return_reason")
+    clarification = output.clarification_question
+    if missing_fields and not clarification:
+        labels = {
+            "order_id": "order ID",
+            "item_id": "item ID",
+            "return_reason": "reason for the return",
+        }
+        clarification = f"Please provide the {', '.join(labels[field] for field in missing_fields)} so I can check the return."
+    return RoutingOutput(
+        intent=output.intent,
+        extracted_fields=context,
+        missing_fields=missing_fields,
+        clarification_question=clarification if missing_fields else None,
+    )
+
+
+def _load_planner_facts(catalog: Catalog, context: ReturnContext, user_id: str) -> dict:
+    if not context.order_id or not context.item_id:
+        return {"error": "missing_required_fields"}
+    order = catalog.get_order(context.order_id)
+    if order is None:
+        return {"order": None, "reason_codes": ["order_not_found"]}
+
+    item = next((candidate for candidate in order.items if candidate.item_id == context.item_id), None)
+    product = catalog.get_product(item.product_id) if item else None
+    policy = catalog.get_policy(product.category) if product else None
+    eligibility = check_return_policy(catalog, context.order_id, context.item_id)
+    return {
+        "order": order.model_dump(mode="json"),
+        "authenticated_user_id": user_id,
+        "user_owns_order": order.user_id == user_id,
+        "item": item.model_dump(mode="json") if item else None,
+        "product": product.model_dump(mode="json") if product else None,
+        "policy": policy.model_dump(mode="json") if policy else None,
+        "eligibility": eligibility.model_dump(mode="json"),
+    }
+
+
+def _normalize_planner_output(output: PlannerOutput, routing: RoutingOutput, facts: dict) -> PlannerOutput:
+    context = routing.extracted_fields
+    if facts.get("order") and not facts.get("user_owns_order"):
+        return PlannerOutput(
+            status="rejected",
+            reason_codes=["order_not_owned_by_user"],
+            explanation="The requested order does not belong to the authenticated user.",
+            proposed_tool_calls=[],
+        )
+
+    proposals = list(output.proposed_tool_calls)
+
+    if context.order_id and not any(call.name == "get_order" for call in proposals):
+        proposals.insert(
+            0,
             ToolCallProposal(
                 name="get_order",
                 args={"order_id": context.order_id},
                 safety="read_only",
                 reason="Load order facts before making a return decision.",
             ),
+        )
+
+    product = facts.get("product") or {}
+    category = product.get("category")
+    if category and not any(call.name == "get_return_policy" for call in proposals):
+        proposals.append(
             ToolCallProposal(
                 name="get_return_policy",
                 args={"category": category},
                 safety="read_only",
                 reason="Load the policy that applies to the item category.",
-            ),
+            )
+        )
+
+    if context.order_id and context.item_id and not any(call.name == "check_refund_eligibility" for call in proposals):
+        proposals.append(
             ToolCallProposal(
                 name="check_refund_eligibility",
                 args={"order_id": context.order_id, "item_id": context.item_id},
                 safety="read_only",
                 reason="Ask the backend policy checker for the authoritative eligibility result.",
-            ),
-        ]
-        if eligibility.eligible:
-            return PlannerOutput(
-                status="approved",
-                reason_codes=["eligible_for_refund"],
-                explanation="The order, item, user ownership, and return policy all allow a refund.",
-                proposed_tool_calls=[
-                    *read_calls,
-                    ToolCallProposal(
-                        name="issue_refund",
-                        args={
-                            "order_id": context.order_id,
-                            "item_id": context.item_id,
-                            "amount": _decimal_to_str(eligibility.amount or Decimal("0")),
-                        },
-                        safety="unsafe_write",
-                        reason="Refund may execute only after backend validation independently confirms it.",
-                    ),
-                ],
             )
-
-        return PlannerOutput(
-            status="rejected",
-            reason_codes=eligibility.reason_codes,
-            explanation="The refund does not satisfy the return policy.",
-            proposed_tool_calls=read_calls,
         )
 
-    def _policy_plan(self, context: ReturnContext) -> PlannerOutput:
-        category = "electronics"
-        if context.order_id and context.item_id:
-            item = self.catalog.get_order_item(context.order_id, context.item_id)
-            product = self.catalog.get_product(item.product_id) if item else None
-            category = product.category if product else category
-        return PlannerOutput(
-            status="needs_clarification",
-            reason_codes=["policy_information_only"],
-            explanation="Policy questions are answered without executing a refund.",
-            proposed_tool_calls=[
-                ToolCallProposal(
-                    name="get_return_policy",
-                    args={"category": category},
-                    safety="read_only",
-                    reason="Retrieve policy text for the requested category.",
-                )
-            ],
+    eligibility = facts.get("eligibility") or {}
+    eligible = bool(eligibility.get("eligible")) and bool(facts.get("user_owns_order"))
+    if not eligible:
+        proposals = [call for call in proposals if call.name != "issue_refund"]
+    elif not any(call.name == "issue_refund" for call in proposals):
+        proposals.append(
+            ToolCallProposal(
+                name="issue_refund",
+                args={
+                    "order_id": context.order_id,
+                    "item_id": context.item_id,
+                    "amount": eligibility["amount"],
+                },
+                safety="unsafe_write",
+                reason="Refund may execute only after backend validation independently confirms it.",
+            )
         )
 
-
-class QAAgent:
-    async def run(self, routing: RoutingOutput, planner: PlannerOutput, tool_results) -> str:
-        if routing.clarification_question:
-            return routing.clarification_question
-        if planner.status == "approved":
-            refund_result = next(
-                (
-                    result
-                    for result in tool_results
-                    if result.proposal.name == "issue_refund" and result.ok
-                ),
-                None,
-            )
-            if refund_result and refund_result.result:
-                return (
-                    f"Your return is approved and refund {refund_result.result['refund_id']} "
-                    f"has been issued for ${refund_result.result['amount']}."
-                )
-            return (
-                "Your return appears eligible, but the refund was not issued because backend "
-                "validation did not approve the tool call."
-            )
-        if planner.status == "rejected":
-            return f"I cannot approve this refund because {_human_reason(planner.reason_codes)}."
-        if planner.proposed_tool_calls and planner.proposed_tool_calls[0].name == "get_return_policy":
-            policy_result = next((result for result in tool_results if result.ok), None)
-            if policy_result and policy_result.result:
-                return policy_result.result.get("notes", planner.explanation)
-        return planner.explanation
-
-
-def _classify_intent(text: str):
-    if "policy" in text:
-        return "return_policy_question"
-    if any(term in text for term in ("return", "refund", "money back", "exchange")):
-        return "return_request"
-    if "status" in text:
-        return "refund_status"
-    return "unknown"
-
-
-def _extract_reason(text: str) -> str | None:
-    reasons = {
-        "damaged": ("damaged", "broken", "defective", "not working"),
-        "wrong_item": ("wrong item", "incorrect item"),
-        "fit": ("too small", "too large", "doesn't fit", "does not fit"),
-        "changed_mind": ("changed my mind", "do not want", "don't want"),
-    }
-    for label, phrases in reasons.items():
-        if any(phrase in text for phrase in phrases):
-            return label
-    return None
-
-
-def _missing_fields(intent: str, context: ReturnContext) -> list[str]:
-    if intent != "return_request":
-        return []
-    missing = []
-    if not context.order_id:
-        missing.append("order_id")
-    if not context.item_id:
-        missing.append("item_id")
-    if not context.return_reason:
-        missing.append("return_reason")
-    return missing
-
-
-def _clarification_question(missing_fields: list[str]) -> str | None:
-    if not missing_fields:
-        return None
-    labels = {
-        "order_id": "order ID",
-        "item_id": "item ID",
-        "return_reason": "reason for the return",
-    }
-    readable = ", ".join(labels[field] for field in missing_fields)
-    return f"Please provide the {readable} so I can check the return."
-
-
-def _decimal_to_str(value: Decimal) -> str:
-    return f"{value:.2f}"
-
-
-def _human_reason(reason_codes: list[str]) -> str:
-    phrases = {
-        "order_not_found": "I could not find that order",
-        "order_not_owned_by_user": "that order does not belong to your account",
-        "item_not_found": "that item is not on the order",
-        "item_not_refundable": "the item is marked non-refundable",
-        "policy_disallows_refund": "the policy does not allow refunds for this category",
-        "return_window_expired": "the return window has expired",
-        "order_not_delivered": "the order has not been delivered",
-        "missing_delivery_date": "the delivery date is missing",
-    }
-    return "; ".join(phrases.get(code, code.replace("_", " ")) for code in reason_codes)
+    return output.model_copy(update={"proposed_tool_calls": proposals})

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from app.llm import LlmClient, OpenAILlmClient
 from app.models import ChatMessage, PlannerOutput, ToolExecutionResult
 from app.return_agents import PlannerAgent, QAAgent, RoutingAgent
 from app.return_models import ReturnConversationRequest, ReturnConversationResponse
@@ -18,12 +19,14 @@ class ReturnConversationService:
         *,
         session_store: JsonSessionStore | None = None,
         tools: BackendTools | None = None,
+        llm_client: LlmClient | None = None,
     ) -> None:
         self.session_store = session_store or JsonSessionStore()
         self.tools = tools or BackendTools()
-        self.routing_agent = RoutingAgent()
-        self.planner_agent = PlannerAgent(self.tools.catalog)
-        self.qa_agent = QAAgent()
+        self.llm_client = llm_client or OpenAILlmClient()
+        self.routing_agent = RoutingAgent(self.llm_client)
+        self.planner_agent = PlannerAgent(self.tools.catalog, self.llm_client)
+        self.qa_agent = QAAgent(self.llm_client)
 
     async def handle_message(self, request: ReturnConversationRequest) -> ReturnConversationResponse:
         logger.info(

@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 
+from app.llm import RuleBasedLlmClient
 from app.return_models import ReturnConversationRequest
 from app.return_service import ReturnConversationService
 from app.session_store import JsonSessionStore
@@ -11,7 +12,10 @@ def run(coro):
 
 
 def service(tmp_path: Path) -> ReturnConversationService:
-    return ReturnConversationService(session_store=JsonSessionStore(tmp_path / "sessions.json"))
+    return ReturnConversationService(
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        llm_client=RuleBasedLlmClient(),
+    )
 
 
 def test_return_chatbot_asks_for_missing_fields(tmp_path: Path) -> None:
