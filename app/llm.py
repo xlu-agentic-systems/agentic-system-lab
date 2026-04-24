@@ -59,12 +59,14 @@ class OpenAILlmClient:
     def _get_client(self):
         if self._client is None:
             try:
+                from dotenv import load_dotenv
                 from openai import AsyncOpenAI
             except ImportError as exc:
                 raise RuntimeError(
                     "The openai package is required for LLM calls. Install project dependencies with "
                     '`pip install -e ".[dev]"`.'
                 ) from exc
+            load_dotenv()
             self._client = AsyncOpenAI()
         return self._client
 
