@@ -132,6 +132,7 @@ class UploadResponse(BaseModel):
     document_id: str
     filename: str
     chunk_count: int
+    context: SessionContext | None = None
 
 
 class FileAnswer(BaseModel):

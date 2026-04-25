@@ -29,7 +29,9 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
         files={"file": ("brief.md", b"The launch brief mentions API contract review.", "text/markdown")},
     )
     assert upload.status_code == 200
-    assert upload.json()["chunk_count"] == 1
+    upload_body = upload.json()
+    assert upload_body["chunk_count"] == 1
+    assert upload_body["context"]["current_document_id"] == upload_body["document_id"]
 
     chat = client.post(
         "/chat",

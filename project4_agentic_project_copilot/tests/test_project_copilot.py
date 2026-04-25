@@ -98,6 +98,9 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
         )
     )
 
+    assert upload.context is not None
+    assert upload.context.current_document_id == upload.document_id
+
     response = run(
         copilot.chat(
             ChatRequest(
@@ -111,6 +114,44 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
     assert response.context.current_document_id == upload.document_id
     assert response.citations
     assert response.citations[0].document_id == upload.document_id
+
+
+def test_upload_after_file_question_allows_how_about_now_followup(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    before_upload = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="issue-12",
+                message="can yuo say something about the file",
+            )
+        )
+    )
+
+    upload = run(
+        copilot.upload_file(
+            filename="issue_12_brief.md",
+            content_type="text/markdown",
+            content=b"# Issue 12 Brief\nThe uploaded file describes the copilot follow-up repair.",
+            session_id="issue-12",
+        )
+    )
+
+    after_upload = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="issue-12",
+                message="how about now",
+            )
+        )
+    )
+
+    assert before_upload.route == "clarify"
+    assert upload.context is not None
+    assert upload.context.current_document_id == upload.document_id
+    assert after_upload.route == "file_retrieval"
+    assert after_upload.context.current_document_id == upload.document_id
+    assert after_upload.citations
+    assert after_upload.citations[0].document_id == upload.document_id
 
 
 def test_file_retrieval_does_not_cross_session_boundaries(tmp_path: Path) -> None:

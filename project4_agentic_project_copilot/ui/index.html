@@ -259,11 +259,16 @@
         }
         const data = await response.json();
         const existingContext = currentContext();
-        document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
-        context.textContent = JSON.stringify({
+        const uploadContext = data.context || {
           current_project_id: existingContext.current_project_id || null,
           current_task_id: existingContext.current_task_id || null,
           current_document_id: data.document_id
+        };
+        document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
+        context.textContent = JSON.stringify({
+          current_project_id: uploadContext.current_project_id || null,
+          current_task_id: uploadContext.current_task_id || null,
+          current_document_id: uploadContext.current_document_id || data.document_id
         }, null, 2);
       } catch (error) {
         document.getElementById("upload-status").textContent = `Upload failed: ${error.message}`;
