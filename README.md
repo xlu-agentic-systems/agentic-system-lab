@@ -15,7 +15,7 @@ agentic-system-lab/
 
 - `project1_multi_agent_return_bot`: LLM-backed e-commerce return chatbot.
 - `project2_agent_orchestrator`: LLM-backed customer-support agent orchestrator.
-- `project3_adaptive_eval_system`: reserved for the adaptive eval system workstream.
+- `project3_adaptive_eval_system`: LLM-backed adaptive evaluation harness.
 
 Shared architecture notes live in `docs/`. Project-specific implementation and
 tests live inside each project folder so PRs can coexist without competing over a
@@ -25,5 +25,6 @@ root-level `app/` package.
 
 - `docs/architecture.md`: current architecture for the three implemented projects.
 - `docs/tradeoffs.md`: cross-project design tradeoffs and non-goals.
-- `docs/mcp_architecture.md`: conceptual MCP host/client/server architecture and
-  an e-commerce support example.
+- `docs/example_conversations.md`: representative request/response traces.
+- `docs/latency_benchmark.md`: local latency/concurrency benchmark strategy,
+  tooling, and interpretation guidance.
