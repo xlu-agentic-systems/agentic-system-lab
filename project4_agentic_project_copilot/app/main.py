@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from project4_agentic_project_copilot.app.models import ChatRequest, ChatResponse, UploadResponse
+from project4_agentic_project_copilot.app.models import (
+    ChatRequest,
+    ChatResponse,
+    DeleteDocumentResponse,
+    DocumentListResponse,
+    SelectDocumentResponse,
+    UploadResponse,
+)
 from project4_agentic_project_copilot.app.service import ProjectCopilotService
 
 
@@ -49,3 +56,21 @@ async def upload(file: UploadFile = File(...), session_id: str | None = Form(def
         content=content,
         session_id=session_id,
     )
+
+
+@app.get("/documents", response_model=DocumentListResponse)
+async def list_documents() -> DocumentListResponse:
+    return await get_service().list_documents()
+
+
+@app.post("/documents/{document_id}/select", response_model=SelectDocumentResponse)
+async def select_document(document_id: str, session_id: str = Form(...)) -> SelectDocumentResponse:
+    try:
+        return await get_service().select_document(session_id=session_id, document_id=document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/documents/{document_id}", response_model=DeleteDocumentResponse)
+async def delete_document(document_id: str, session_id: str | None = None) -> DeleteDocumentResponse:
+    return await get_service().delete_document(session_id=session_id, document_id=document_id)

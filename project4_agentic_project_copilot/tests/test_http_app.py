@@ -35,6 +35,19 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert upload_body["chunk_count"] == 1
     assert upload_body["context"]["current_document_id"] == upload_body["document_id"]
     assert upload_body["context"]["current_document_filename"] == "brief.md"
+    assert upload_body["reindexed_chunk_count"] == 1
+
+    listed = client.get("/documents")
+    assert listed.status_code == 200
+    listed_body = listed.json()
+    assert [document["filename"] for document in listed_body["documents"]] == ["brief.md"]
+
+    selected = client.post(
+        f"/documents/{upload_body['document_id']}/select",
+        data={"session_id": "http-selected"},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["context"]["current_document_filename"] == "brief.md"
 
     chat = client.post(
         "/chat",
@@ -45,3 +58,10 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert body["route"] == "file_retrieval"
     assert body["citations"]
     assert body["context"]["current_document_filename"] == "brief.md"
+
+    deleted = client.delete(f"/documents/{upload_body['document_id']}", params={"session_id": "http"})
+    assert deleted.status_code == 200
+    deleted_body = deleted.json()
+    assert deleted_body["deleted"] is True
+    assert deleted_body["context"]["current_document_id"] is None
+    assert client.get("/documents").json()["documents"] == []

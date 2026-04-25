@@ -133,6 +133,31 @@ class UploadResponse(BaseModel):
     document_id: str
     filename: str
     chunk_count: int
+    reindexed_chunk_count: int = 0
+    context: SessionContext | None = None
+
+
+class DocumentSummary(BaseModel):
+    document_id: str
+    filename: str
+    content_type: str
+    chunk_count: int
+    created_at: str
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentSummary]
+
+
+class SelectDocumentResponse(BaseModel):
+    document: DocumentSummary
+    context: SessionContext
+
+
+class DeleteDocumentResponse(BaseModel):
+    document_id: str
+    deleted: bool
+    reindexed_chunk_count: int
     context: SessionContext | None = None
 
 

@@ -84,6 +84,19 @@
       cursor: pointer;
       font-weight: 600;
     }
+    button.secondary {
+      background: #fff;
+      color: var(--accent);
+    }
+    button.danger {
+      border-color: #b91c1c;
+      background: #fff;
+      color: #b91c1c;
+    }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
     aside { padding-bottom: 12px; }
     aside section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
     h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; }
@@ -102,6 +115,32 @@
       line-height: 1.4;
       margin: 8px 0 0;
       overflow-wrap: anywhere;
+    }
+    .document-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .document-row {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+    }
+    .document-title {
+      font-size: 13px;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+    .document-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .document-actions button {
+      padding: 5px 8px;
+      font-size: 12px;
     }
     .citation {
       border-left: 3px solid var(--accent);
@@ -132,6 +171,10 @@
         <button id="upload" type="button">Upload</button>
         <p id="upload-status" class="small"></p>
         <p id="selected-document" class="state-line">No file selected.</p>
+      </section>
+      <section>
+        <h2>Documents</h2>
+        <div id="documents-list" class="document-list small">No uploaded documents.</div>
       </section>
       <section>
         <h2>Context</h2>
@@ -174,6 +217,7 @@
     const confirmButton = document.getElementById("confirm");
     const uploadButton = document.getElementById("upload");
     const selectedDocument = document.getElementById("selected-document");
+    const documentsList = document.getElementById("documents-list");
 
     function addMessage(role, text) {
       const item = document.createElement("div");
@@ -185,26 +229,124 @@
 
     function currentContext() {
       try {
-        return JSON.parse(context.textContent);
+        return normalizeContext(JSON.parse(context.textContent));
       } catch (error) {
         return {};
       }
     }
 
+    function normalizeContext(rawContext = {}) {
+      return {
+        current_project_id: rawContext.current_project_id || null,
+        current_task_id: rawContext.current_task_id || null,
+        current_document_id: rawContext.current_document_id || (rawContext.current_document && rawContext.current_document.id) || null,
+        current_document_filename: rawContext.current_document_filename || (rawContext.current_document && rawContext.current_document.filename) || null
+      };
+    }
+
     function renderContext(rawContext = {}) {
-      const currentDocumentId = rawContext.current_document_id || null;
-      const currentDocumentFilename = rawContext.current_document_filename || null;
+      const normalized = normalizeContext(rawContext);
+      const currentDocumentId = normalized.current_document_id;
+      const currentDocumentFilename = normalized.current_document_filename;
       selectedDocument.textContent = currentDocumentFilename
         ? `Current file: ${currentDocumentFilename}`
         : currentDocumentId ? "Current file selected." : "No file selected.";
       context.textContent = JSON.stringify({
-        current_project_id: rawContext.current_project_id || null,
-        current_task_id: rawContext.current_task_id || null,
+        current_project_id: normalized.current_project_id,
+        current_task_id: normalized.current_task_id,
         current_document: currentDocumentId ? {
           id: currentDocumentId,
           filename: currentDocumentFilename
         } : null
       }, null, 2);
+    }
+
+    async function loadDocuments() {
+      try {
+        const response = await fetch("/documents");
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        renderDocuments(data.documents || []);
+      } catch (error) {
+        documentsList.textContent = `Could not load documents: ${error.message}`;
+      }
+    }
+
+    function renderDocuments(documents) {
+      documentsList.textContent = "";
+      if (!documents.length) {
+        documentsList.textContent = "No uploaded documents.";
+        return;
+      }
+      const active = currentContext().current_document_id;
+      documents.forEach((documentInfo) => {
+        const row = document.createElement("div");
+        row.className = "document-row";
+        const title = document.createElement("div");
+        title.className = "document-title";
+        title.textContent = active === documentInfo.document_id ? `${documentInfo.filename} (current)` : documentInfo.filename;
+        const meta = document.createElement("div");
+        meta.textContent = `${documentInfo.chunk_count} chunks`;
+        const actions = document.createElement("div");
+        actions.className = "document-actions";
+        const selectButton = document.createElement("button");
+        selectButton.className = "secondary";
+        selectButton.type = "button";
+        selectButton.textContent = "Select";
+        selectButton.addEventListener("click", () => selectDocument(documentInfo.document_id));
+        const deleteButton = document.createElement("button");
+        deleteButton.className = "danger";
+        deleteButton.type = "button";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", () => deleteDocument(documentInfo.document_id, documentInfo.filename));
+        actions.appendChild(selectButton);
+        actions.appendChild(deleteButton);
+        row.appendChild(title);
+        row.appendChild(meta);
+        row.appendChild(actions);
+        documentsList.appendChild(row);
+      });
+    }
+
+    async function selectDocument(documentId) {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      try {
+        const response = await fetch(`/documents/${encodeURIComponent(documentId)}/select`, {
+          method: "POST",
+          body: formData
+        });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        renderContext(data.context);
+        addMessage("assistant", `Selected ${data.document.filename} as the current file.`);
+        await loadDocuments();
+      } catch (error) {
+        addMessage("assistant", `Select failed: ${error.message}`);
+      }
+    }
+
+    async function deleteDocument(documentId, filename) {
+      try {
+        const response = await fetch(`/documents/${encodeURIComponent(documentId)}?session_id=${encodeURIComponent(sessionId)}`, {
+          method: "DELETE"
+        });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        if (data.context) renderContext(data.context);
+        addMessage("assistant", data.deleted
+          ? `Deleted ${filename}. Reindexed ${data.reindexed_chunk_count} chunks.`
+          : `${filename} was not found.`);
+        await loadDocuments();
+      } catch (error) {
+        addMessage("assistant", `Delete failed: ${error.message}`);
+      }
     }
 
     async function readError(response) {
@@ -295,7 +437,11 @@
         };
         document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
         renderContext(uploadContext);
-        addMessage("assistant", `Uploaded ${data.filename} (${data.chunk_count} chunks). It is now the current file.`);
+        addMessage(
+          "assistant",
+          `Uploaded ${data.filename} (${data.chunk_count} chunks). It is now the current file. Reindexed ${data.reindexed_chunk_count} chunks.`
+        );
+        await loadDocuments();
       } catch (error) {
         document.getElementById("upload-status").textContent = `Upload failed: ${error.message}`;
       } finally {
@@ -305,6 +451,8 @@
     });
 
     addMessage("assistant", "Ask about uploaded docs, query tasks, or request task actions. Writes require confirmation.");
+    renderContext({});
+    loadDocuments();
   </script>
 </body>
 </html>

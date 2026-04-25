@@ -6,9 +6,10 @@ context, and clarification.
 
 ```mermaid
 flowchart TD
-    UI["Chat UI + file upload"]
+    UI["Chat UI + file upload + document library"]
     API["FastAPI app"]
     Session["JsonSessionStore\nsession context + pending actions"]
+    Documents["Document library\nlist / select / delete"]
     Orchestrator["CopilotOrchestrator\nroute decision"]
     Files["File RAG path\nextract + chunk + embed + retrieve"]
     SQL["SQL path\nschema -> SELECT -> validation -> SQLite"]
@@ -19,6 +20,8 @@ flowchart TD
     Response["ChatResponse\ncitations / SQL / tool results"]
 
     UI --> API --> Session --> Orchestrator
+    API --> Documents
+    Documents --> Files
     Orchestrator --> Files
     Orchestrator --> SQL
     Orchestrator --> Tools
@@ -43,6 +46,11 @@ Project 4 keeps everything local for the MVP:
 - JSON session file for current context and pending confirmations.
 - JSONL trace file for orchestration decisions.
 
+Uploaded documents are durable in SQLite. The UI document library reads the
+`documents` and `document_chunks` tables to show all stored documents, allows a
+user to select a stored document as the current session document, and can delete
+a stored document.
+
 File uploads are tied to the active chat session. The upload endpoint stores the
 chunks in SQLite and records the uploaded `document_id` as
 `SessionContext.current_document_id` and the uploaded filename as
@@ -57,6 +65,11 @@ the newly selected document.
 Embeddings are generated before the SQLite write transaction starts. The
 transaction only inserts the document and chunks, which avoids holding a write
 lock while waiting on external embedding calls.
+
+After document inserts and deletes, the system reindexes the local vector store
+by recomputing embeddings for all remaining stored chunks. This is deliberately
+simple for the MVP. A production system would usually replace this full reindex
+with an incremental vector index update plus background repair jobs.
 
 In production, the same logical split would map to:
 

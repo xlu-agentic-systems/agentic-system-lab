@@ -12,8 +12,11 @@ from project4_agentic_project_copilot.app.models import (
     ChatRequest,
     ChatResponse,
     Citation,
+    DeleteDocumentResponse,
     DecisionLog,
+    DocumentListResponse,
     PendingAction,
+    SelectDocumentResponse,
     SessionContext,
     SqlResult,
     ToolCall,
@@ -56,6 +59,37 @@ class ProjectCopilotService:
             await self.session_store.save(context)
             upload.context = context
         return upload
+
+    async def list_documents(self) -> DocumentListResponse:
+        return DocumentListResponse(documents=self.document_store.list_documents())
+
+    async def select_document(self, *, session_id: str, document_id: str) -> SelectDocumentResponse:
+        document = self.document_store.get_document(document_id)
+        if document is None:
+            raise ValueError(f"document {document_id} does not exist")
+        context = await self.session_store.load(session_id)
+        context.current_document_id = document.document_id
+        context.current_document_filename = document.filename
+        append_turn(context, role="assistant", content=f"Selected {document.filename} as the current document.")
+        await self.session_store.save(context)
+        return SelectDocumentResponse(document=document, context=context)
+
+    async def delete_document(self, *, session_id: str | None, document_id: str) -> DeleteDocumentResponse:
+        deleted, reindexed_count = await self.document_store.delete_document(document_id)
+        context = None
+        if session_id:
+            context = await self.session_store.load(session_id)
+            if context.current_document_id == document_id:
+                context.current_document_id = None
+                context.current_document_filename = None
+                append_turn(context, role="assistant", content="Deleted the selected document and cleared the current file.")
+            await self.session_store.save(context)
+        return DeleteDocumentResponse(
+            document_id=document_id,
+            deleted=deleted,
+            reindexed_chunk_count=reindexed_count,
+            context=context,
+        )
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         context = await self.session_store.load(request.session_id)
@@ -110,6 +144,8 @@ class ProjectCopilotService:
                 "I do not have a file selected for this session yet. Upload a markdown, text, or PDF file first, then ask about it.",
             )
         if not self.document_store.has_documents(document_id):
+            context.current_document_id = None
+            context.current_document_filename = None
             return self._clarify(
                 request,
                 context,
