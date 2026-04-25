@@ -1,6 +1,6 @@
 # Agentic System Tradeoffs
 
-This document compares the three system designs in this repo. It is grounded in
+This document compares the system designs in this repo. It is grounded in
 the current codebase and avoids describing capabilities that are not implemented.
 
 ## Fixed Pipeline vs Orchestrator
@@ -133,11 +133,18 @@ Project 4 adds a different pattern from Projects 1-3. It combines an
 orchestrator with capability paths:
 
 - RAG over uploaded files
+- document-library operations for persisted uploads
 - safe text-to-SQL over local structured data
 - confirmed API tool invocation for project actions
 - session context for current project/task/document
 
 The tradeoff is a broader safety surface. Retrieval needs citations and source
-grounding; SQL needs read-only validation; API actions need confirmation before
-writes. This is more complex than a pure RAG app, but it better matches a real
-project copilot that must work across files, data, and actions.
+grounding; document deletion needs session-context cleanup and vector reindexing;
+SQL needs read-only validation; API actions need confirmation before writes.
+This is more complex than a pure RAG app, but it better matches a real project
+copilot that must work across files, data, and actions.
+
+Project 4 currently uses SQLite rows with JSON embeddings and a full embedding
+reindex after document insert/delete. That is intentionally simple for a local
+prototype. A production version would usually use incremental vector index
+updates and background reindex/repair jobs.

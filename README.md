@@ -26,10 +26,12 @@ root-level `app/` package.
 
 ## Docs
 
-- `docs/architecture.md`: current architecture for the three implemented projects.
+- `docs/architecture.md`: current architecture for the implemented projects.
 - `docs/tradeoffs.md`: cross-project design tradeoffs and non-goals.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/latency_benchmark.md`: local latency/concurrency benchmark strategy,
   tooling, and interpretation guidance.
+- `docs/project4_rag_pipeline.md`: Project 4 RAG pipeline, document
+  persistence, document library, retrieval, citations, and reindexing.
 - `project4_agentic_project_copilot/docs/architecture.md`: retrieval and
   tool-use copilot architecture.

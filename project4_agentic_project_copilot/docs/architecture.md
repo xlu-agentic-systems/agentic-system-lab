@@ -108,3 +108,6 @@ Retrieval and tool-use copilot architecture
 
 It still uses the Project 2 orchestrator idea, but routes by capability rather
 than by customer-support domain.
+
+For the end-to-end upload, persistence, retrieval, citation, document-library,
+and reindexing flow, see `../../docs/project4_rag_pipeline.md`.
