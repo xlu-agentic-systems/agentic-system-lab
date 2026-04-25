@@ -20,10 +20,3 @@ agentic-system-lab/
 Shared architecture notes live in `docs/`. Project-specific implementation and
 tests live inside each project folder so PRs can coexist without competing over a
 root-level `app/` package.
-
-## Docs
-
-- `docs/architecture.md`: current architecture for the three implemented projects.
-- `docs/tradeoffs.md`: cross-project design tradeoffs and non-goals.
-- `docs/mcp_architecture.md`: conceptual MCP host/client/server architecture and
-  an e-commerce support example.
