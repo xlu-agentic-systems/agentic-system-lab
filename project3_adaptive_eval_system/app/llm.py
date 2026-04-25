@@ -122,6 +122,7 @@ class RuleBasedLlmClient:
 
 
 def _evaluate_trace(trace: dict) -> dict:
+    tool_calls = trace.get("tool_calls", [])
     text = " ".join(
         [
             trace.get("user_message", ""),
@@ -129,7 +130,7 @@ def _evaluate_trace(trace: dict) -> dict:
             trace.get("expected_behavior", ""),
             trace.get("policy_basis") or "",
             " ".join(item.get("output", "") for item in trace.get("agent_outputs", [])),
-            " ".join(item.get("summary", "") for item in trace.get("tool_calls", [])),
+            " ".join(item.get("summary", "") for item in tool_calls),
         ]
     ).lower()
     issues = []
@@ -143,7 +144,11 @@ def _evaluate_trace(trace: dict) -> dict:
                 "recommendation": "Instruct return planning to calculate eligibility from delivery date unless policy says otherwise.",
             }
         )
-    if "refund" in text and "unsafe" in text:
+    unsafe_refund = any(
+        item.get("tool_name") == "issue_refund" and item.get("proposed") and not item.get("safe", False)
+        for item in tool_calls
+    )
+    if unsafe_refund or ("refund" in text and "unsafe" in text and "blocked" in text):
         issues.append(
             {
                 "category": "unsafe_tool_proposal",
@@ -196,10 +201,13 @@ def _generate_patch(trace: dict, evaluation: dict) -> dict:
     instruction = issue.get("recommendation", "Improve prompt clarity.")
     if issue.get("category") == "incorrect_policy_interpretation":
         instruction = "Return eligibility must be calculated from delivery date unless the policy explicitly says otherwise."
+    target_prompt = "Planner Agent"
+    if trace.get("project") == "project1_multi_agent_return_bot":
+        target_prompt = "prompts/project1_multi_agent.md#Planner Agent"
     return {
         "patch_id": f"patch-{trace['trace_id']}",
         "trace_id": trace["trace_id"],
-        "target_prompt": "Planner Agent",
+        "target_prompt": target_prompt,
         "proposed_instruction": instruction,
         "rationale": f"Generated from evaluation issue: {issue.get('description', 'failure')}",
         "status": "proposed",

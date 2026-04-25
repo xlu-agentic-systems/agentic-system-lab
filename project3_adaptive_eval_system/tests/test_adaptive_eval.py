@@ -1,8 +1,18 @@
 import asyncio
 from pathlib import Path
 
+from project1_multi_agent_return_bot.app.models import (
+    PlannerOutput,
+    ReturnContext,
+    RoutingOutput,
+    ToolCallArgs,
+    ToolCallProposal,
+    ToolExecutionResult,
+)
+from project1_multi_agent_return_bot.app.trace_store import ReturnConversationTrace
 from project3_adaptive_eval_system.app.llm import RuleBasedLlmClient
 from project3_adaptive_eval_system.app.models import ConversationTrace
+from project3_adaptive_eval_system.app.project1_feedback import Project1FeedbackAdapter
 from project3_adaptive_eval_system.app.service import EvaluationService
 from project3_adaptive_eval_system.app.store import (
     ConversationTraceStore,
@@ -196,3 +206,110 @@ def test_openai_llm_client_uses_responses_parse_with_structured_output() -> None
     assert parsed.trace_id == "trace-good"
     assert fake_client.responses.kwargs["model"] == "test-model"
     assert fake_client.responses.kwargs["text_format"] is EvaluationResult
+
+
+def test_project1_feedback_imports_trace_and_generates_prompt_patch(tmp_path: Path) -> None:
+    project1_trace_path = tmp_path / "project1_traces.jsonl"
+    project1_trace_path.write_text(_project1_failed_refund_trace().model_dump_json() + "\n")
+    trace_store = ConversationTraceStore(tmp_path / "project3_traces.jsonl")
+    eval_service = EvaluationService(
+        trace_store=trace_store,
+        generated_test_store=GeneratedTestStore(tmp_path / "generated" / "regression_cases.jsonl"),
+        prompt_patch_store=PromptPatchStore(tmp_path / "patches.jsonl"),
+        report_path=tmp_path / "evaluation_report.md",
+        llm_client=RuleBasedLlmClient(),
+        project1_adapter=Project1FeedbackAdapter(
+            trace_path=project1_trace_path,
+            log_query_tool=FakeLokiTool(),
+        ),
+    )
+
+    result = run(eval_service.run_project1_feedback(include_loki_context=True))
+
+    assert result.import_result.imported_count == 1
+    assert result.import_result.included_loki_context is True
+    assert result.evaluation_result.trace_count == 1
+    assert result.evaluation_result.evaluations[0].requires_regression is True
+    assert result.evaluation_result.generated_tests[0].trace_id.startswith("project1-project1-session")
+    assert result.evaluation_result.prompt_patches[0].target_prompt == "prompts/project1_multi_agent.md#Planner Agent"
+    assert "backend validation" in result.evaluation_result.prompt_patches[0].proposed_instruction.lower()
+
+    imported_trace = trace_store.load_traces()[0]
+    assert imported_trace.project == "project1_multi_agent_return_bot"
+    assert imported_trace.outcome == "failure"
+    assert any(record.check_name == "loki_context" and record.passed for record in imported_trace.backend_validations)
+
+
+def test_project1_trace_import_deduplicates_by_trace_id(tmp_path: Path) -> None:
+    project1_trace_path = tmp_path / "project1_traces.jsonl"
+    project1_trace_path.write_text(_project1_failed_refund_trace().model_dump_json() + "\n")
+    trace_store = ConversationTraceStore(tmp_path / "project3_traces.jsonl")
+    eval_service = EvaluationService(
+        trace_store=trace_store,
+        generated_test_store=GeneratedTestStore(tmp_path / "generated" / "regression_cases.jsonl"),
+        prompt_patch_store=PromptPatchStore(tmp_path / "patches.jsonl"),
+        report_path=tmp_path / "evaluation_report.md",
+        llm_client=RuleBasedLlmClient(),
+        project1_adapter=Project1FeedbackAdapter(trace_path=project1_trace_path),
+    )
+
+    first = eval_service.import_project1_traces()
+    second = eval_service.import_project1_traces()
+
+    assert first.trace_ids == second.trace_ids
+    assert len(trace_store.load_traces()) == 1
+
+
+class FakeLokiTool:
+    def query_agent_events(self, **kwargs):
+        assert kwargs["project"] == "project1"
+        assert kwargs["session_id"] == "project1-session"
+        return {
+            "response": {
+                "data": {
+                    "result": [
+                        {"stream": {"event": "agent_decision"}, "values": [["1", "{}"]]},
+                        {"stream": {"event": "tool_execution"}, "values": [["2", "{}"]]},
+                    ]
+                }
+            }
+        }
+
+
+def _project1_failed_refund_trace() -> ReturnConversationTrace:
+    proposal = ToolCallProposal(
+        name="issue_refund",
+        args=ToolCallArgs(order_id="order-2001", item_id="item-4", amount="129.99"),
+        safety="unsafe_write",
+        reason="Refund requested by planner.",
+    )
+    return ReturnConversationTrace(
+        session_id="project1-session",
+        user_id="user-1",
+        user_message="Please refund item-4 from order-2001.",
+        response="No refund was issued because backend validation blocked the request.",
+        routing=RoutingOutput(
+            intent="return_request",
+            extracted_fields=ReturnContext(
+                order_id="order-2001",
+                item_id="item-4",
+                return_reason="defective",
+                refund_requested=True,
+            ),
+            missing_fields=[],
+        ),
+        planner=PlannerOutput(
+            status="approved",
+            reason_codes=[],
+            explanation="Planner approved a refund before ownership validation.",
+            proposed_tool_calls=[proposal],
+        ),
+        tool_results=[
+            ToolExecutionResult(
+                proposal=proposal,
+                executed=False,
+                ok=False,
+                error="refund blocked: user does not own order",
+            )
+        ],
+    )

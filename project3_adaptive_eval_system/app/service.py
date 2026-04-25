@@ -11,11 +11,15 @@ from project3_adaptive_eval_system.app.agents import (
 )
 from project3_adaptive_eval_system.app.llm import LlmClient, OpenAILlmClient
 from project3_adaptive_eval_system.app.models import (
+    ConversationTrace,
     EvaluationRunResult,
     EvaluationResult,
     GeneratedTestCase,
+    Project1FeedbackRunResult,
+    Project1TraceImportResult,
     PromptPatch,
 )
+from project3_adaptive_eval_system.app.project1_feedback import Project1FeedbackAdapter
 from project3_adaptive_eval_system.app.store import (
     ConversationTraceStore,
     GeneratedTestStore,
@@ -37,6 +41,7 @@ class EvaluationService:
         prompt_patch_store: PromptPatchStore | None = None,
         report_path: Path | str = DEFAULT_REPORT_PATH,
         llm_client: LlmClient | None = None,
+        project1_adapter: Project1FeedbackAdapter | None = None,
     ) -> None:
         self.trace_store = trace_store or ConversationTraceStore()
         self.generated_test_store = generated_test_store or GeneratedTestStore()
@@ -46,9 +51,77 @@ class EvaluationService:
         self.evaluation_agent = EvaluationAgent(self.llm_client)
         self.test_case_generator = TestCaseGenerator(self.llm_client)
         self.prompt_improvement_agent = PromptImprovementAgent(self.llm_client)
+        self.project1_adapter = project1_adapter or Project1FeedbackAdapter()
 
     async def run_evaluation(self, trace_limit: int | None = None) -> EvaluationRunResult:
         traces = self.trace_store.load_traces(trace_limit)
+        return await self._evaluate_traces(traces, trace_limit=trace_limit)
+
+    def import_project1_traces(
+        self,
+        *,
+        trace_path: str | None = None,
+        trace_limit: int | None = None,
+        include_loki_context: bool = False,
+        loki_since_minutes: int = 60,
+    ) -> Project1TraceImportResult:
+        adapter = self.project1_adapter
+        if trace_path is not None:
+            adapter = Project1FeedbackAdapter(trace_path=trace_path, log_query_tool=adapter.log_query_tool)
+        imported, result = adapter.convert_traces(
+            limit=trace_limit,
+            include_loki_context=include_loki_context,
+            loki_since_minutes=loki_since_minutes,
+        )
+        existing = {trace.trace_id: trace for trace in self.trace_store.load_traces()}
+        for trace in imported:
+            existing[trace.trace_id] = trace
+        self.trace_store.write_all(existing.values())
+        log_agent_event(
+            logger,
+            event="project1_trace_imported",
+            message="project3 imported Project 1 traces for adaptive evaluation",
+            agent="evaluation_service",
+            attributes={
+                "imported_count": result.imported_count,
+                "source_path": result.source_path,
+                "included_loki_context": result.included_loki_context,
+            },
+        )
+        return result
+
+    async def run_project1_feedback(
+        self,
+        *,
+        trace_path: str | None = None,
+        trace_limit: int | None = None,
+        include_loki_context: bool = False,
+        loki_since_minutes: int = 60,
+    ) -> Project1FeedbackRunResult:
+        adapter = self.project1_adapter
+        if trace_path is not None:
+            adapter = Project1FeedbackAdapter(trace_path=trace_path, log_query_tool=adapter.log_query_tool)
+        imported, import_result = adapter.convert_traces(
+            limit=trace_limit,
+            include_loki_context=include_loki_context,
+            loki_since_minutes=loki_since_minutes,
+        )
+        existing = {trace.trace_id: trace for trace in self.trace_store.load_traces()}
+        for trace in imported:
+            existing[trace.trace_id] = trace
+        self.trace_store.write_all(existing.values())
+        evaluation_result = await self._evaluate_traces(imported, trace_limit=trace_limit)
+        return Project1FeedbackRunResult(
+            import_result=import_result,
+            evaluation_result=evaluation_result,
+        )
+
+    async def _evaluate_traces(
+        self,
+        traces: list[ConversationTrace],
+        *,
+        trace_limit: int | None = None,
+    ) -> EvaluationRunResult:
         log_agent_event(
             logger,
             event="evaluation_run_started",
