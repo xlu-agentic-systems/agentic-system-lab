@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from app.llm import LlmClient, OpenAILlmClient
-from app.models import ChatMessage, PlannerOutput, ToolExecutionResult
-from app.return_agents import PlannerAgent, QAAgent, RoutingAgent
-from app.return_models import ReturnConversationRequest, ReturnConversationResponse
-from app.session_store import JsonSessionStore
-from app.tools import BackendTools, validate_and_execute_tool
+from project1_multi_agent_return_bot.app.llm import LlmClient, OpenAILlmClient
+from project1_multi_agent_return_bot.app.models import ChatMessage, PlannerOutput, ToolExecutionResult
+from project1_multi_agent_return_bot.app.return_agents import PlannerAgent, QAAgent, RoutingAgent
+from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest, ReturnConversationResponse
+from project1_multi_agent_return_bot.app.session_store import JsonSessionStore
+from project1_multi_agent_return_bot.app.tools import BackendTools, validate_and_execute_tool
 
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,8 @@
 import asyncio
 
-from project1_multi_agent_return_bot.app.catalog import Catalog
-from project1_multi_agent_return_bot.app.models import ToolCallProposal
-from project1_multi_agent_return_bot.app.tools import BackendTools, validate_and_execute_tool
+from project2_agent_orchestrator.app.catalog import Catalog
+from project2_agent_orchestrator.app.models import ToolCallProposal
+from project2_agent_orchestrator.app.tools import BackendTools, validate_and_execute_tool
 
 
 def run(coro):

@@ -28,7 +28,7 @@ deterministic and do not require network access.
 pip install -e ".[dev]"
 export OPENAI_API_KEY="..."
 # optional: export OPENAI_MODEL="gpt-5.5"
-PYTHONPATH=project1_multi_agent_return_bot uvicorn app.main:app --reload
+uvicorn project1_multi_agent_return_bot.app.main:app --reload
 ```
 
 Then post to `http://127.0.0.1:8000/returns/chat`:

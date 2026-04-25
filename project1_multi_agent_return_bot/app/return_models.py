@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.models import ConversationRequest, PlannerOutput, RoutingOutput, ToolExecutionResult
+from project1_multi_agent_return_bot.app.models import ConversationRequest, PlannerOutput, RoutingOutput, ToolExecutionResult
 
 
 class ReturnConversationRequest(ConversationRequest):

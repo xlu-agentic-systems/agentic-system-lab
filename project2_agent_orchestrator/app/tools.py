@@ -5,8 +5,8 @@ from collections import defaultdict
 from decimal import Decimal
 from uuid import uuid4
 
-from project1_multi_agent_return_bot.app.catalog import Catalog, catalog
-from project1_multi_agent_return_bot.app.models import (
+from project2_agent_orchestrator.app.catalog import Catalog, catalog
+from project2_agent_orchestrator.app.models import (
     BackendActionResult,
     ProposedAction,
     RefundRecord,
@@ -14,7 +14,7 @@ from project1_multi_agent_return_bot.app.models import (
     ToolCallProposal,
     ToolExecutionResult,
 )
-from project1_multi_agent_return_bot.app.policy import check_return_policy
+from project2_agent_orchestrator.app.policy import check_return_policy
 
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from project1_multi_agent_return_bot.app.models import SessionState
+from project2_agent_orchestrator.app.models import SessionState
 
 
 DEFAULT_SESSION_PATH = Path(__file__).resolve().parent.parent / "data" / "sessions.json"

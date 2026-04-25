@@ -1,10 +1,10 @@
 import asyncio
 from pathlib import Path
 
-from app.llm import RuleBasedLlmClient
-from app.return_models import ReturnConversationRequest
-from app.return_service import ReturnConversationService
-from app.session_store import JsonSessionStore
+from project1_multi_agent_return_bot.app.llm import RuleBasedLlmClient
+from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest
+from project1_multi_agent_return_bot.app.return_service import ReturnConversationService
+from project1_multi_agent_return_bot.app.session_store import JsonSessionStore
 
 
 def run(coro):

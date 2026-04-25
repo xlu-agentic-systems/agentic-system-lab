@@ -4,8 +4,8 @@ import logging
 
 from fastapi import FastAPI
 
-from app.return_models import ReturnConversationRequest, ReturnConversationResponse
-from app.return_service import ReturnConversationService
+from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest, ReturnConversationResponse
+from project1_multi_agent_return_bot.app.return_service import ReturnConversationService
 
 
 logging.basicConfig(

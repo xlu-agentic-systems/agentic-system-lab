@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from app.catalog import Catalog, catalog
-from app.llm import LlmClient
-from app.models import (
+from project1_multi_agent_return_bot.app.catalog import Catalog, catalog
+from project1_multi_agent_return_bot.app.llm import LlmClient
+from project1_multi_agent_return_bot.app.models import (
     PlannerOutput,
     ReturnContext,
     RoutingOutput,
@@ -12,8 +12,8 @@ from app.models import (
     ToolCallProposal,
     ToolExecutionResult,
 )
-from app.policy import check_return_policy
-from app.return_models import QAOutput
+from project1_multi_agent_return_bot.app.policy import check_return_policy
+from project1_multi_agent_return_bot.app.return_models import QAOutput
 
 
 logger = logging.getLogger(__name__)

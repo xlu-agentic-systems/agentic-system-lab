@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from project1_multi_agent_return_bot.app.catalog import Catalog
-from project1_multi_agent_return_bot.app.models import EligibilityResult, OrderItem, ReturnPolicy
+from project2_agent_orchestrator.app.catalog import Catalog
+from project2_agent_orchestrator.app.models import EligibilityResult, OrderItem, ReturnPolicy
 
 
 def check_return_policy(

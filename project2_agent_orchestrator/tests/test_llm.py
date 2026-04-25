@@ -1,7 +1,7 @@
 import asyncio
 
-from project1_multi_agent_return_bot.app.llm import OpenAILlmClient
-from project1_multi_agent_return_bot.app.models import RoutingOutput
+from project2_agent_orchestrator.app.llm import OpenAILlmClient
+from project2_agent_orchestrator.app.models import OrchestratorDecision
 
 
 def run(coro):
@@ -18,11 +18,10 @@ class FakeResponses:
             "FakeResponse",
             (),
             {
-                "output_parsed": RoutingOutput(
-                    intent="return_request",
-                    extracted_fields={},
-                    missing_fields=["order_id", "item_id", "return_reason"],
-                    clarification_question="Please provide the order ID, item ID, and reason for the return.",
+                "output_parsed": OrchestratorDecision(
+                    selected_agents=["shipping_agent"],
+                    execution_mode="single_agent",
+                    reasoning="test",
                 )
             },
         )()
@@ -40,14 +39,14 @@ def test_openai_llm_client_uses_responses_parse_with_structured_output() -> None
 
     parsed = run(
         llm_client.parse(
-            task_name="return_routing_agent",
+            task_name="orchestrator_routing",
             system_prompt="system",
-            user_payload={"message": "I need a refund"},
-            response_model=RoutingOutput,
+            user_payload={"message": "Where is my package?"},
+            response_model=OrchestratorDecision,
         )
     )
 
-    assert parsed.intent == "return_request"
+    assert parsed.selected_agents == ["shipping_agent"]
     assert fake_client.responses.kwargs["model"] == "test-model"
-    assert fake_client.responses.kwargs["text_format"] is RoutingOutput
+    assert fake_client.responses.kwargs["text_format"] is OrchestratorDecision
     assert fake_client.responses.kwargs["input"][0] == {"role": "system", "content": "system"}

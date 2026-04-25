@@ -1,5 +1,5 @@
-from project1_multi_agent_return_bot.app.catalog import Catalog
-from project1_multi_agent_return_bot.app.policy import check_return_policy
+from project2_agent_orchestrator.app.catalog import Catalog
+from project2_agent_orchestrator.app.policy import check_return_policy
 
 
 def test_eligible_item_inside_return_window() -> None:

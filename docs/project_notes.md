@@ -2,11 +2,11 @@
 
 ## Current Runtime Model
 
-Project 1 calls OpenAI models at runtime. The return-chatbot agents use
-`OpenAILlmClient`, which calls the Responses API and parses Pydantic structured
-outputs:
+Projects 1 and 2 call OpenAI models at runtime through `OpenAILlmClient`, which
+calls the Responses API and parses Pydantic structured outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
+- `POST /chat`: an orchestrator-led support flow
 
 Set `OPENAI_API_KEY` before running the API. `OPENAI_MODEL` defaults to
 `gpt-5.5` and can be overridden for evals or cost/latency tradeoffs.
@@ -61,7 +61,7 @@ The orchestrator is useful when the request can span domains:
 request -> select specialists -> choose execution mode -> aggregate -> respond
 ```
 
-That is represented by the Project 2 support orchestrator workstream.
+That is represented by the Project 2 support orchestrator at `POST /chat`.
 
 The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
@@ -72,8 +72,8 @@ each other, execute irreversible tools, or own session state.
 The LLM receives:
 
 - Input: `message`, `user_id`, loaded session context, and relevant backend/tool facts.
-- Output: validated Pydantic objects such as `RoutingOutput`, `PlannerOutput`,
-  `AgentResult`, and `QAOutput`.
+- Output: validated Pydantic objects such as `OrchestratorDecision`,
+  `RoutingOutput`, `PlannerOutput`, `AgentResult`, and `QAOutput`.
 - Execution: backend invokes tools after policy validation.
 
 The LLM should help classify, summarize, and reason over ambiguous customer

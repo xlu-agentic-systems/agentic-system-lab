@@ -41,3 +41,25 @@ item membership, refundable status, exact refund amount, and policy eligibility.
 Policy and status questions do not enter refund execution. Refund tool proposals
 are normalized out unless the routing intent is a confirmed `return_request` with
 the required return context.
+
+## Project 2: Agent Orchestrator
+
+The support orchestrator is implemented in
+`project2_agent_orchestrator/app/service.py` and exposed at `POST /chat`.
+
+1. Load session state from `JsonSessionStore`.
+2. Run LLM-backed orchestration to select specialist agents and an execution mode.
+3. Merge model-extracted context with deterministic ID extraction.
+4. Run selected specialists as `single_agent`, `sequential`, or `parallel`.
+5. Add escalation when specialist confidence is low, results disagree, or a sensitive change is requested.
+6. Execute only validated safe backend actions automatically.
+7. Aggregate specialist results into one customer-facing response.
+
+Project 2 uses the same `OpenAILlmClient` pattern as Project 1. The default
+runtime path calls the OpenAI Responses API for the orchestration decision and
+for each specialist `AgentResult`. Tests inject `RuleBasedLlmClient` and include
+an explicit assertion that the orchestrator hits the LLM boundary.
+
+Backend tools remain deterministic. The model proposes actions and summaries;
+the backend owns session persistence, execution planning, validation, and
+side-effect control.
