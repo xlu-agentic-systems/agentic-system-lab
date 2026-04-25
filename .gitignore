@@ -8,4 +8,7 @@ __pycache__/
 data/sessions.json
 project1_multi_agent_return_bot/data/sessions.json
 project2_agent_orchestrator/data/sessions.json
+project4_agentic_project_copilot/data/*.sqlite3
+project4_agentic_project_copilot/data/sessions.json
+project4_agentic_project_copilot/data/conversation_traces.jsonl
 *.egg-info/

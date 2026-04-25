@@ -38,6 +38,8 @@ Use `docs/` for design and workflow notes. It keeps the repository readable:
 - `docs/tradeoffs.md`: cross-project architecture tradeoffs and non-goals.
 - `docs/latency_benchmark.md`: local benchmark strategy for comparing latency,
   caller concurrency, and architecture tradeoffs.
+- `project4_agentic_project_copilot/docs/architecture.md`: the retrieval,
+  text-to-SQL, and project-tool copilot pattern.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/project_notes.md`: implementation rationale and agentic coding workflow.
 
