@@ -1,3 +1,76 @@
-# Project 3: Adaptive Eval System
+# Project 3: Adaptive Evaluation System
 
-Placeholder for the adaptive eval system project.
+Small adaptive evaluation prototype for agentic customer-support workflows.
+
+The system reviews completed conversation traces, detects failures, generates
+regression test cases, and proposes prompt patches for human review. The
+production path is intentionally out of band: prompt changes are stored as
+proposals and are never applied automatically.
+
+## Flow
+
+`trace store -> Evaluation Agent -> Test Case Generator -> Prompt Improvement Agent -> Markdown report`
+
+- `ConversationTraceStore`: stores and loads durable JSONL traces.
+- `EvaluationAgent`: scores completed traces and detects failures.
+- `TestCaseGenerator`: turns failed traces into replayable regression cases.
+- `PromptImprovementAgent`: proposes prompt patches that require human approval.
+- `EvaluationService`: orchestrates the feedback loop and writes artifacts.
+
+## Run
+
+```bash
+pip install -e ".[dev]"
+cp .env.example .env
+# fill OPENAI_API_KEY in .env
+set -a
+source .env
+set +a
+python -m project3_adaptive_eval_system.app.cli evaluate
+```
+
+To run the API:
+
+```bash
+uvicorn project3_adaptive_eval_system.app.main:app --reload
+```
+
+Then call `POST /evaluations/run`.
+
+Prompt patches can be reviewed through `POST /prompt-patches/review`. This is
+the simulated human review layer; patches remain `proposed` until that endpoint
+explicitly approves or rejects them.
+
+## Real LLM Calls
+
+The default runtime path uses `OpenAILlmClient`, which calls the OpenAI
+Responses API with Pydantic structured outputs. Unit tests inject
+`RuleBasedLlmClient` so tests stay deterministic and do not require network
+access.
+
+## Safety Boundary
+
+Adaptive does not mean uncontrolled self-learning. Project 3 only proposes
+prompt improvements:
+
+- production prompts are not rewritten automatically
+- proposed patches are stored with `status="proposed"`
+- a human must approve a patch before it can become active
+- approval is simulated through the prompt-patch review endpoint
+- generated tests are regression artifacts, not production behavior changes
+
+## Generated Artifacts
+
+- `sample_traces/`: good and bad conversation traces
+- `generated_tests/`: generated regression test cases
+- `prompt_patches.jsonl`: proposed prompt patches
+- `evaluation_report.md`: latest Markdown evaluation report
+
+## Tests
+
+```bash
+pytest -q project3_adaptive_eval_system/tests
+```
+
+Coverage includes trace storage, evaluation behavior, regression generation,
+prompt patch safety, and the OpenAI structured-output adapter.

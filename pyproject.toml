@@ -21,5 +21,7 @@ addopts = ["--import-mode=importlib"]
 testpaths = [
   "project1_multi_agent_return_bot/tests",
   "project2_agent_orchestrator/tests",
+  "project3_adaptive_eval_system/tests",
+  "project3_adaptive_eval_system/generated_tests",
 ]
 pythonpath = ["."]
