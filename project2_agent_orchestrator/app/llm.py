@@ -102,7 +102,7 @@ class RuleBasedLlmClient:
         user_payload: dict,
         response_model: type[T],
     ) -> T:
-        from project2_agent_orchestrator.app.models import AgentResult, OrchestratorDecision
+        from project2_agent_orchestrator.app.models import AgentOutput, AgentResult, OrchestratorDecision
 
         self.calls.append(task_name)
         message = str(user_payload.get("message", ""))
@@ -110,7 +110,7 @@ class RuleBasedLlmClient:
 
         if response_model is OrchestratorDecision:
             return response_model.model_validate(_rule_based_orchestrator_decision(message, text))
-        if response_model is AgentResult:
+        if response_model in {AgentOutput, AgentResult}:
             return response_model.model_validate(_rule_based_agent_result(task_name, user_payload))
 
         raise NotImplementedError(f"RuleBasedLlmClient does not support {response_model.__name__}")

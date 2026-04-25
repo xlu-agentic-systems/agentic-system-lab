@@ -47,8 +47,10 @@ The support orchestrator is implemented in
 
 Project 2 uses the same `OpenAILlmClient` pattern as Project 1. The default
 runtime path calls the OpenAI Responses API for the orchestration decision and
-for each specialist `AgentResult`. Tests inject `RuleBasedLlmClient` and include
-an explicit assertion that the orchestrator hits the LLM boundary.
+for each specialist `AgentOutput`, then the backend converts that LLM-facing
+draft into the richer `AgentResult` returned by the API. Tests inject
+`RuleBasedLlmClient` and include an explicit assertion that the orchestrator hits
+the LLM boundary.
 
 ## Shared Safety Boundary
 

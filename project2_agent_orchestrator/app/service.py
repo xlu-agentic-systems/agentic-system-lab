@@ -7,6 +7,7 @@ import re
 from project2_agent_orchestrator.app.llm import LlmClient, OpenAILlmClient
 from project2_agent_orchestrator.app.models import (
     AgentName,
+    AgentOutput,
     AgentResult,
     ChatMessage,
     ConversationRequest,
@@ -47,7 +48,7 @@ class ReturnAgent:
             order = resolved["order"]
             item = resolved["item"]
             eligibility = await self.tools.check_return_eligibility(order["order_id"], item["item_id"])
-        result = await self.llm_client.parse(
+        output = await self.llm_client.parse(
             task_name=self.name,
             system_prompt=_specialist_prompt(
                 self.name,
@@ -60,8 +61,9 @@ class ReturnAgent:
                 "resolved": resolved,
                 "eligibility": eligibility,
             },
-            response_model=AgentResult,
+            response_model=AgentOutput,
         )
+        result = _to_agent_result(output, {"resolved": resolved, "eligibility": eligibility})
         return _normalize_return_result(result, resolved, eligibility)
 
 
@@ -74,15 +76,16 @@ class ShippingAgent:
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         status = await self.tools.get_shipping_status(user_id, context.order_id)
-        return await self.llm_client.parse(
+        output = await self.llm_client.parse(
             task_name=self.name,
             system_prompt=_specialist_prompt(
                 self.name,
                 "Assess package status from backend shipping facts. Escalate delayed, lost, or missing shipments.",
             ),
             user_payload={"message": message, "context": context.model_dump(mode="json"), "shipping_status": status},
-            response_model=AgentResult,
+            response_model=AgentOutput,
         )
+        return _to_agent_result(output, status)
 
 
 class PaymentAgent:
@@ -98,7 +101,7 @@ class PaymentAgent:
         if any(term in text for term in ("timeline", "how long", "when will", "refund status")):
             timeline = await self.tools.get_refund_timeline()
         duplicates = await self.tools.find_duplicate_charges(user_id, context.order_id)
-        return await self.llm_client.parse(
+        output = await self.llm_client.parse(
             task_name=self.name,
             system_prompt=_specialist_prompt(
                 self.name,
@@ -112,8 +115,9 @@ class PaymentAgent:
                 "duplicate_charge_result": duplicates,
                 "refund_timeline": timeline,
             },
-            response_model=AgentResult,
+            response_model=AgentOutput,
         )
+        return _to_agent_result(output, {"duplicate_charge_result": duplicates, "refund_timeline": timeline})
 
 
 class AccountAgent:
@@ -125,7 +129,7 @@ class AccountAgent:
 
     async def run(self, message: str, user_id: str, context: ReturnContext) -> AgentResult:
         profile = await self.tools.get_account_profile(user_id)
-        return await self.llm_client.parse(
+        output = await self.llm_client.parse(
             task_name=self.name,
             system_prompt=_specialist_prompt(
                 self.name,
@@ -133,8 +137,9 @@ class AccountAgent:
                 "escalation and identity verification; do not claim changes were made.",
             ),
             user_payload={"message": message, "context": context.model_dump(mode="json"), "profile": profile},
-            response_model=AgentResult,
+            response_model=AgentOutput,
         )
+        return _to_agent_result(output, profile)
 
 
 class EscalationAgent:
@@ -154,7 +159,7 @@ class EscalationAgent:
         needs_escalation = [result.agent for result in prior_results if result.needs_escalation]
         reasons = [code for result in prior_results for code in result.reason_codes]
         reason = f"Customer request: {message}; reason codes: {', '.join(reasons) or 'unknown'}"
-        result = await self.llm_client.parse(
+        output = await self.llm_client.parse(
             task_name=self.name,
             system_prompt=_specialist_prompt(
                 self.name,
@@ -170,7 +175,15 @@ class EscalationAgent:
                 "prior_results": [result.model_dump(mode="json") for result in prior_results],
                 "ticket_reason": reason,
             },
-            response_model=AgentResult,
+            response_model=AgentOutput,
+        )
+        result = _to_agent_result(
+            output,
+            {
+                "low_confidence_agents": low_confidence,
+                "escalating_agents": needs_escalation,
+                "prior_reason_codes": reasons,
+            },
         )
         result.agent = self.name
         if not any(action.name == "create_support_ticket" for action in result.proposed_actions):
@@ -474,6 +487,18 @@ def _specialist_prompt(agent_name: str, role_guidance: str) -> str:
         "Use confidence between 0 and 1. Set needs_escalation=true for low confidence, "
         "sensitive changes, missing records, disagreement, or human-review cases. "
         "No irreversible actions are executed by agents; agents only propose actions."
+    )
+
+
+def _to_agent_result(output: AgentOutput, details: dict | None = None) -> AgentResult:
+    return AgentResult(
+        agent=output.agent,
+        confidence=output.confidence,
+        summary=output.summary,
+        details=details or {},
+        proposed_actions=output.proposed_actions,
+        needs_escalation=output.needs_escalation,
+        reason_codes=output.reason_codes,
     )
 
 

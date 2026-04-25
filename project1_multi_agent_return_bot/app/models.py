@@ -65,9 +65,17 @@ class ToolCallProposal(BaseModel):
         "issue_refund",
         "create_support_ticket",
     ]
-    args: dict[str, Any]
+    args: ToolCallArgs
     safety: ToolSafety
     reason: str
+
+
+class ToolCallArgs(BaseModel):
+    order_id: str | None = None
+    item_id: str | None = None
+    category: str | None = None
+    amount: str | None = None
+    reason: str | None = None
 
 
 class PlannerOutput(BaseModel):
@@ -107,10 +115,18 @@ class OrchestratorDecision(BaseModel):
 
 class ProposedAction(BaseModel):
     name: str
-    args: dict[str, Any] = Field(default_factory=dict)
+    args: ProposedActionArgs = Field(default_factory=lambda: ProposedActionArgs())
     safety: ToolSafety
     requires_approval: bool = True
     reason: str
+
+
+class ProposedActionArgs(BaseModel):
+    order_id: str | None = None
+    item_id: str | None = None
+    amount: str | None = None
+    payment_id: str | None = None
+    reason: str | None = None
 
 
 class BackendActionResult(BaseModel):
