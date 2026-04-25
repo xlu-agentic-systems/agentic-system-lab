@@ -65,7 +65,7 @@ class ToolAgent:
             user_payload={
                 "message": message,
                 "tool_name": decision.tool_name,
-                "tool_args": decision.tool_args,
+                "tool_args": decision.tool_args.clean(),
                 "context": context.model_dump(mode="json"),
             },
             response_model=ToolCall,

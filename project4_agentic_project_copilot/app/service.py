@@ -46,8 +46,13 @@ class ProjectCopilotService:
         self.tool_agent = ToolAgent(self.llm_client)
         self.file_qa_agent = FileQaAgent(self.llm_client)
 
-    async def upload_file(self, *, filename: str, content_type: str, content: bytes):
-        return await self.document_store.ingest_bytes(filename=filename, content_type=content_type, content=content)
+    async def upload_file(self, *, filename: str, content_type: str, content: bytes, session_id: str | None = None):
+        upload = await self.document_store.ingest_bytes(filename=filename, content_type=content_type, content=content)
+        if session_id:
+            context = await self.session_store.load(session_id)
+            context.current_document_id = upload.document_id
+            await self.session_store.save(context)
+        return upload
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         context = await self.session_store.load(request.session_id)
@@ -57,17 +62,30 @@ class ProjectCopilotService:
             await self._persist(request.message, response)
             return response
 
-        decision = await self.orchestrator.decide(request.message, context)
-        if decision.route == "file_retrieval":
-            response = await self._answer_from_files(request, context, decision.reasoning, decision.search_query or request.message)
-        elif decision.route == "sql_query":
-            response = await self._answer_from_sql(request, context, decision.reasoning)
-        elif decision.route == "api_tool":
-            response = await self._handle_tool(request, context, decision)
-        elif decision.route == "context":
-            response = self._answer_from_context(request, context, decision.reasoning)
-        else:
-            response = self._clarify(request, context, decision.reasoning, decision.clarification_question)
+        response = self._preflight_response(request, context)
+        if response is None:
+            try:
+                if _asks_about_files(request.message.strip().lower()) and context.current_document_id:
+                    response = await self._answer_from_files(
+                        request,
+                        context,
+                        "The user asked about the current session document.",
+                        request.message,
+                    )
+                else:
+                    decision = await self.orchestrator.decide(request.message, context)
+                    if decision.route == "file_retrieval":
+                        response = await self._answer_from_files(request, context, decision.reasoning, decision.search_query or request.message)
+                    elif decision.route == "sql_query":
+                        response = await self._answer_from_sql(request, context, decision.reasoning)
+                    elif decision.route == "api_tool":
+                        response = await self._handle_tool(request, context, decision)
+                    elif decision.route == "context":
+                        response = self._answer_from_context(request, context, decision.reasoning)
+                    else:
+                        response = self._clarify(request, context, decision.reasoning, decision.clarification_question)
+            except Exception as exc:
+                response = self._model_error_response(request, context, exc)
 
         await self._persist(request.message, response)
         return response
@@ -79,7 +97,38 @@ class ProjectCopilotService:
         reasoning: str,
         query: str,
     ) -> ChatResponse:
-        chunks = await self.document_store.search(query)
+        document_id = context.current_document_id
+        if not document_id:
+            return self._clarify(
+                request,
+                context,
+                "The user asked about files, but this session has no current document.",
+                "I do not have a file selected for this session yet. Upload a markdown, text, or PDF file first, then ask about it.",
+            )
+        if not self.document_store.has_documents(document_id):
+            return self._clarify(
+                request,
+                context,
+                "The session references a document that has no stored chunks.",
+                "I cannot find the selected document chunks anymore. Upload the file again, then ask about it.",
+            )
+        if not self.document_store.has_documents():
+            return self._clarify(
+                request,
+                context,
+                "The user asked about files, but no uploaded document chunks are available.",
+                "I do not have an uploaded file in this workspace yet. Upload a markdown, text, or PDF file first, then ask about it.",
+            )
+        chunks = await self.document_store.search(query, document_id=document_id)
+        if not chunks:
+            return self._response(
+                request,
+                context,
+                response="I could not find relevant uploaded file content for that question.",
+                route="file_retrieval",
+                citations=[],
+                log=DecisionLog(route="file_retrieval", reasoning=reasoning, selected_data_source="uploaded_files"),
+            )
         answer = await self.file_qa_agent.answer(
             request.message,
             [chunk.model_dump(mode="json") for chunk in chunks],
@@ -212,6 +261,36 @@ class ProjectCopilotService:
             log=DecisionLog(route="clarify", reasoning=reasoning),
         )
 
+    def _preflight_response(self, request: ChatRequest, context: SessionContext) -> ChatResponse | None:
+        text = request.message.strip().lower()
+        if _is_greeting(text):
+            return self._clarify(
+                request,
+                context,
+                "Simple greeting handled without a model call.",
+                "Hi. Upload a file or ask me about tasks, project data, or a task action.",
+            )
+        if _asks_about_files(text) and not context.current_document_id:
+            return self._clarify(
+                request,
+                context,
+                "The user asked about a file before any file was uploaded.",
+                "I do not have an uploaded file in this workspace yet. Upload a markdown, text, or PDF file first, then ask about it.",
+            )
+        return None
+
+    def _model_error_response(self, request: ChatRequest, context: SessionContext, exc: Exception) -> ChatResponse:
+        return self._response(
+            request,
+            context,
+            response=(
+                "I could not complete the model call. Check OPENAI_API_KEY, OPENAI_MODEL, "
+                "and network access, then try again."
+            ),
+            route="clarify",
+            log=DecisionLog(route="clarify", reasoning=f"Model/API call failed: {type(exc).__name__}: {exc}"),
+        )
+
     def _response(self, request: ChatRequest, context: SessionContext, **kwargs) -> ChatResponse:
         response_text = kwargs.pop("response")
         if "log" in kwargs:
@@ -247,3 +326,11 @@ def _explain_tool_result(result: ToolResult) -> str:
     if not result.ok:
         return f"The tool call failed: {result.error}"
     return f"Tool {result.name} executed successfully: {result.result}"
+
+
+def _is_greeting(text: str) -> bool:
+    return text in {"hi", "hello", "hey", "hi there", "hello there"}
+
+
+def _asks_about_files(text: str) -> bool:
+    return any(term in text for term in ("this file", "file", "document", "doc", "pdf", "markdown"))

@@ -169,41 +169,65 @@
       messages.scrollTop = messages.scrollHeight;
     }
 
+    function currentContext() {
+      try {
+        return JSON.parse(context.textContent);
+      } catch (error) {
+        return {};
+      }
+    }
+
+    async function readError(response) {
+      try {
+        const data = await response.json();
+        return data.detail || data.error || JSON.stringify(data);
+      } catch (error) {
+        return await response.text();
+      }
+    }
+
     async function send(message, confirmActionId = null) {
       const body = { session_id: sessionId, message };
       if (confirmActionId) body.confirm_action_id = confirmActionId;
-      const response = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      const data = await response.json();
-      addMessage("assistant", data.response);
-      context.textContent = JSON.stringify({
-        current_project_id: data.context.current_project_id,
-        current_task_id: data.context.current_task_id,
-        current_document_id: data.context.current_document_id
-      }, null, 2);
-      sql.textContent = data.generated_sql || "No SQL for this turn.";
-      tool.textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn.";
-      toolResult.textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn.";
-      pendingActionId = data.pending_action ? data.pending_action.action_id : null;
-      confirmButton.style.display = pendingActionId ? "block" : "none";
-      citations.textContent = "";
-      if (data.citations.length) {
-        data.citations.forEach((citation) => {
-          const item = document.createElement("div");
-          item.className = "citation";
-          const title = document.createElement("strong");
-          title.textContent = citation.filename;
-          const quote = document.createElement("div");
-          quote.textContent = citation.quote;
-          item.appendChild(title);
-          item.appendChild(quote);
-          citations.appendChild(item);
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
         });
-      } else {
-        citations.textContent = "No citations for this turn.";
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        addMessage("assistant", data.response);
+        context.textContent = JSON.stringify({
+          current_project_id: data.context.current_project_id,
+          current_task_id: data.context.current_task_id,
+          current_document_id: data.context.current_document_id
+        }, null, 2);
+        sql.textContent = data.generated_sql || "No SQL for this turn.";
+        tool.textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn.";
+        toolResult.textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn.";
+        pendingActionId = data.pending_action ? data.pending_action.action_id : null;
+        confirmButton.style.display = pendingActionId ? "block" : "none";
+        citations.textContent = "";
+        if (data.citations.length) {
+          data.citations.forEach((citation) => {
+            const item = document.createElement("div");
+            item.className = "citation";
+            const title = document.createElement("strong");
+            title.textContent = citation.filename;
+            const quote = document.createElement("div");
+            quote.textContent = citation.quote;
+            item.appendChild(title);
+            item.appendChild(quote);
+            citations.appendChild(item);
+          });
+        } else {
+          citations.textContent = "No citations for this turn.";
+        }
+      } catch (error) {
+        addMessage("assistant", `Request failed: ${error.message}`);
       }
     }
 
@@ -227,9 +251,23 @@
       if (!file) return;
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch("/upload", { method: "POST", body: formData });
-      const data = await response.json();
-      document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
+      formData.append("session_id", sessionId);
+      try {
+        const response = await fetch("/upload", { method: "POST", body: formData });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        const existingContext = currentContext();
+        document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
+        context.textContent = JSON.stringify({
+          current_project_id: existingContext.current_project_id || null,
+          current_task_id: existingContext.current_task_id || null,
+          current_document_id: data.document_id
+        }, null, 2);
+      } catch (error) {
+        document.getElementById("upload-status").textContent = `Upload failed: ${error.message}`;
+      }
     });
 
     addMessage("assistant", "Ask about uploaded docs, query tasks, or request task actions. Writes require confirmation.");

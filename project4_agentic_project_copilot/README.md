@@ -43,6 +43,21 @@ http://127.0.0.1:8004/
 The live app uses OpenAI for LLM calls and embeddings. Tests use deterministic
 local clients so they do not require network access.
 
+Live configuration comes from the environment:
+
+```text
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.5
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_TIMEOUT_SECONDS=30
+```
+
+The browser UI sends the active `session_id` with file uploads, so the uploaded
+document becomes the session's current document. A follow-up such as "what is
+this file doing?" retrieves from that document and returns citations. If a model
+or API call fails, the backend returns a visible chat response and the UI shows
+request/upload errors instead of silently dropping the turn.
+
 ## Local Data
 
 Project 4 uses local SQLite for the MVP:

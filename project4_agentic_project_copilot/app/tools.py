@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
-from project4_agentic_project_copilot.app.models import ToolCall, ToolResult
+from project4_agentic_project_copilot.app.models import ToolArgs, ToolCall, ToolResult
 
 
 WRITE_TOOLS = {"create_task", "update_task_status", "assign_task", "add_comment"}
@@ -14,7 +14,7 @@ class ProjectToolService:
         self.db = db or CopilotDatabase()
 
     def preview(self, tool_call: ToolCall) -> str:
-        args = tool_call.args
+        args = _args_dict(tool_call.args)
         if tool_call.name == "create_task":
             return f"Create task '{args.get('title')}' in project {args.get('project_id')}."
         if tool_call.name == "update_task_status":
@@ -26,17 +26,18 @@ class ProjectToolService:
         return f"Search tasks for {args.get('query')!r}."
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
+        args = _args_dict(tool_call.args)
         try:
             if tool_call.name == "create_task":
-                return self._create_task(tool_call.args)
+                return self._create_task(args)
             if tool_call.name == "update_task_status":
-                return self._update_task_status(tool_call.args)
+                return self._update_task_status(args)
             if tool_call.name == "assign_task":
-                return self._assign_task(tool_call.args)
+                return self._assign_task(args)
             if tool_call.name == "add_comment":
-                return self._add_comment(tool_call.args)
+                return self._add_comment(args)
             if tool_call.name == "search_tasks":
-                return self._search_tasks(tool_call.args)
+                return self._search_tasks(args)
         except Exception as exc:
             return ToolResult(name=tool_call.name, ok=False, error=str(exc))
         return ToolResult(name=tool_call.name, ok=False, error=f"Unsupported tool: {tool_call.name}")
@@ -139,3 +140,9 @@ def _require_exists(db: CopilotDatabase, table: str, column: str, value: int) ->
     rows = db.execute_read(f"SELECT 1 AS found FROM {table} WHERE {column} = ?", (value,))
     if not rows:
         raise ValueError(f"{table}.{column}={value} does not exist")
+
+
+def _args_dict(args: ToolArgs | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(args, ToolArgs):
+        return args.clean()
+    return dict(args)

@@ -3,11 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 Route = Literal["context", "file_retrieval", "sql_query", "api_tool", "clarify"]
 ToolName = Literal["create_task", "update_task_status", "assign_task", "add_comment", "search_tasks"]
+TaskStatus = Literal["open", "in_progress", "blocked", "done"]
+
+
+class ToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: int | None = None
+    title: str | None = None
+    description: str | None = None
+    task_id: int | None = None
+    status: TaskStatus | None = None
+    user_id: int | None = None
+    assignee_id: int | None = None
+    changed_by: int | None = None
+    body: str | None = None
+    query: str | None = None
+
+    def clean(self) -> dict:
+        return self.model_dump(exclude_none=True)
 
 
 class Citation(BaseModel):
@@ -50,7 +69,7 @@ class OrchestratorDecision(BaseModel):
     reasoning: str
     search_query: str | None = None
     tool_name: ToolName | None = None
-    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_args: ToolArgs = Field(default_factory=ToolArgs)
     clarification_question: str | None = None
 
 
@@ -68,8 +87,8 @@ class SqlResult(BaseModel):
 
 class ToolCall(BaseModel):
     name: ToolName
-    args: dict[str, Any] = Field(default_factory=dict)
-    requires_confirmation: bool = True
+    args: ToolArgs = Field(default_factory=ToolArgs)
+    requires_confirmation: bool
     reason: str
 
 

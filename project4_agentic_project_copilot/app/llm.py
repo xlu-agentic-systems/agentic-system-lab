@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Protocol, TypeVar
 
@@ -25,10 +26,9 @@ class LlmClient(Protocol):
 
 
 class OpenAILlmClient:
-    def __init__(self, *, model: str | None = None) -> None:
-        import os
-
+    def __init__(self, *, model: str | None = None, timeout_seconds: float | None = None) -> None:
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.5")
+        self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
         self._client = None
 
     async def parse(
@@ -70,7 +70,7 @@ class OpenAILlmClient:
                     "The openai package is required for LLM calls. Install dependencies with "
                     '`pip install -e ".[dev]"`.'
                 ) from exc
-            self._client = AsyncOpenAI()
+            self._client = AsyncOpenAI(timeout=self.timeout_seconds)
         return self._client
 
 

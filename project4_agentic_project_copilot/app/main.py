@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
 from project4_agentic_project_copilot.app.models import ChatRequest, ChatResponse, UploadResponse
@@ -38,10 +38,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @app.post("/upload", response_model=UploadResponse)
-async def upload(file: UploadFile = File(...)) -> UploadResponse:
+async def upload(file: UploadFile = File(...), session_id: str | None = Form(default=None)) -> UploadResponse:
     content = await file.read()
     return await get_service().upload_file(
         filename=file.filename or "uploaded.txt",
         content_type=file.content_type or "application/octet-stream",
         content=content,
+        session_id=session_id,
     )

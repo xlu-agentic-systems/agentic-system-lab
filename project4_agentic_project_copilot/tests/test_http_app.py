@@ -25,6 +25,7 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
 
     upload = client.post(
         "/upload",
+        data={"session_id": "http"},
         files={"file": ("brief.md", b"The launch brief mentions API contract review.", "text/markdown")},
     )
     assert upload.status_code == 200

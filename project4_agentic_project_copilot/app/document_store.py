@@ -49,16 +49,27 @@ class DocumentStore:
             conn.commit()
         return UploadResponse(document_id=document_id, filename=filename, chunk_count=len(chunks))
 
-    async def search(self, query: str, *, top_k: int = 4) -> list[RetrievedChunk]:
+    async def search(self, query: str, *, top_k: int = 4, document_id: str | None = None) -> list[RetrievedChunk]:
         query_embedding = await self.embedding_client.embed(query)
         with self.db.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT c.chunk_id, c.document_id, c.chunk_index, c.text, c.embedding_json, d.filename
-                FROM document_chunks c
-                JOIN documents d ON d.document_id = c.document_id
-                """
-            ).fetchall()
+            if document_id:
+                rows = conn.execute(
+                    """
+                    SELECT c.chunk_id, c.document_id, c.chunk_index, c.text, c.embedding_json, d.filename
+                    FROM document_chunks c
+                    JOIN documents d ON d.document_id = c.document_id
+                    WHERE c.document_id = ?
+                    """,
+                    (document_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT c.chunk_id, c.document_id, c.chunk_index, c.text, c.embedding_json, d.filename
+                    FROM document_chunks c
+                    JOIN documents d ON d.document_id = c.document_id
+                    """
+                ).fetchall()
         scored = []
         for row in rows:
             score = cosine_similarity(query_embedding, json.loads(row["embedding_json"]))
@@ -74,6 +85,14 @@ class DocumentStore:
                 )
             )
         return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+
+    def has_documents(self, document_id: str | None = None) -> bool:
+        with self.db.connect() as conn:
+            if document_id:
+                row = conn.execute("SELECT 1 FROM document_chunks WHERE document_id = ? LIMIT 1", (document_id,)).fetchone()
+            else:
+                row = conn.execute("SELECT 1 FROM document_chunks LIMIT 1").fetchone()
+        return row is not None
 
 
 def extract_text(filename: str, content: bytes) -> str:
