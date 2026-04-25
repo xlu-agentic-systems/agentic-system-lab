@@ -26,8 +26,11 @@ deterministic and do not require network access.
 
 ```bash
 pip install -e ".[dev]"
-export OPENAI_API_KEY="..."
-# optional: export OPENAI_MODEL="gpt-5.5"
+cp .env.example .env
+# fill OPENAI_API_KEY in .env
+set -a
+source .env
+set +a
 uvicorn project1_multi_agent_return_bot.app.main:app --reload
 ```
 
@@ -62,7 +65,9 @@ created.
 pytest -q
 ```
 
-Coverage includes routing, aggregation, policy checks, and backend refund safety.
+Coverage includes routing, policy checks, structured-output wiring, and backend
+refund safety. Unit tests use `RuleBasedLlmClient`; run the API with `.env`
+sourced to exercise real OpenAI calls.
 
 ## Docs
 

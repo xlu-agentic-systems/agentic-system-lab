@@ -135,24 +135,25 @@ async def validate_and_execute_tool(
 ) -> ToolExecutionResult:
     logger.info("tool proposal: %s args=%s", proposal.name, proposal.args)
     try:
+        args = _tool_args(proposal)
         _validate_proposal_shape(proposal)
         if proposal.name == "get_order":
-            result = await tools.get_order(str(proposal.args["order_id"]))
+            result = await tools.get_order(str(args["order_id"]))
         elif proposal.name == "get_return_policy":
-            result = await tools.get_return_policy(str(proposal.args["category"]))
+            result = await tools.get_return_policy(str(args["category"]))
         elif proposal.name == "check_refund_eligibility":
             result = await tools.check_refund_eligibility(
-                str(proposal.args["order_id"]),
-                str(proposal.args["item_id"]),
+                str(args["order_id"]),
+                str(args["item_id"]),
             )
         elif proposal.name == "create_support_ticket":
-            result = await tools.create_support_ticket(user_id, str(proposal.args["reason"]))
+            result = await tools.create_support_ticket(user_id, str(args["reason"]))
         elif proposal.name == "issue_refund":
             _validate_refund_call(tools, proposal, user_id=user_id)
             result = await tools.issue_refund(
-                str(proposal.args["order_id"]),
-                str(proposal.args["item_id"]),
-                Decimal(str(proposal.args["amount"])),
+                str(args["order_id"]),
+                str(args["item_id"]),
+                Decimal(str(args["amount"])),
             )
         else:
             raise ToolValidationError(f"unknown tool: {proposal.name}")
@@ -177,7 +178,8 @@ def _validate_proposal_shape(proposal: ToolCallProposal) -> None:
         "issue_refund": {"order_id", "item_id", "amount"},
         "create_support_ticket": {"reason"},
     }
-    missing = required_args[proposal.name] - proposal.args.keys()
+    args = _tool_args(proposal)
+    missing = required_args[proposal.name] - args.keys()
     if missing:
         raise ToolValidationError(f"missing tool args: {sorted(missing)}")
 
@@ -188,9 +190,10 @@ def _validate_refund_call(
     *,
     user_id: str,
 ) -> None:
-    order_id = str(proposal.args["order_id"])
-    item_id = str(proposal.args["item_id"])
-    proposed_amount = Decimal(str(proposal.args["amount"]))
+    args = _tool_args(proposal)
+    order_id = str(args["order_id"])
+    item_id = str(args["item_id"])
+    proposed_amount = Decimal(str(args["amount"]))
 
     order = tools.catalog.get_order(order_id)
     if order is None:
@@ -224,7 +227,8 @@ async def validate_and_execute_action(
             raise ToolValidationError("only support tickets can be executed automatically")
         if action.safety != "safe_write":
             raise ToolValidationError("unsafe action requires explicit human approval")
-        reason = str(action.args.get("reason", "")).strip()
+        args = action.args.model_dump(exclude_none=True)
+        reason = str(args.get("reason", "")).strip()
         if not reason:
             raise ToolValidationError("missing support ticket reason")
         result = await tools.create_support_ticket(user_id, reason)
@@ -234,3 +238,7 @@ async def validate_and_execute_action(
 
     logger.info("backend action executed: %s", action.name)
     return BackendActionResult(action=action, status="executed", ok=True, result=result)
+
+
+def _tool_args(proposal: ToolCallProposal) -> dict:
+    return proposal.args.model_dump(exclude_none=True)

@@ -37,8 +37,11 @@ The backend owns execution and validation.
 
 ```bash
 pip install -e ".[dev]"
-export OPENAI_API_KEY="..."
-# optional: export OPENAI_MODEL="gpt-5.5"
+cp .env.example .env
+# fill OPENAI_API_KEY in .env
+set -a
+source .env
+set +a
 uvicorn project2_agent_orchestrator.app.main:app --reload
 ```
 
@@ -72,7 +75,8 @@ such as support ticket creation. Unsafe payment/account changes remain proposed.
 pytest -q
 ```
 
-Coverage includes routing, aggregation, policy checks, and backend refund safety.
+Coverage includes routing, aggregation, policy checks, structured-output wiring,
+and backend refund safety.
 Unit tests inject a deterministic `RuleBasedLlmClient`; the default runtime path
 uses `OpenAILlmClient` and makes real Responses API calls.
 

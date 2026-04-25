@@ -8,8 +8,17 @@ calls the Responses API and parses Pydantic structured outputs:
 - `POST /returns/chat`: a fixed return-chatbot pipeline
 - `POST /chat`: an orchestrator-led support flow
 
-Set `OPENAI_API_KEY` before running the API. `OPENAI_MODEL` defaults to
-`gpt-5.5` and can be overridden for evals or cost/latency tradeoffs.
+Set `OPENAI_API_KEY` before running the API. The repo includes `.env.example`;
+copy it to `.env`, fill the key, and source it before starting FastAPI:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+The application does not auto-load `.env`. `OPENAI_MODEL` defaults to `gpt-5.5`
+and can be overridden for evals or cost/latency tradeoffs.
 
 Unit tests inject `RuleBasedLlmClient` instead of calling the network. That is
 intentional for the interview-focused version:
@@ -73,7 +82,8 @@ The LLM receives:
 
 - Input: `message`, `user_id`, loaded session context, and relevant backend/tool facts.
 - Output: validated Pydantic objects such as `OrchestratorDecision`,
-  `RoutingOutput`, `PlannerOutput`, `AgentResult`, and `QAOutput`.
+  `RoutingOutput`, `PlannerOutput`, Project 2 LLM-facing `AgentOutput`, backend
+  `AgentResult`, and `QAOutput`.
 - Execution: backend invokes tools after policy validation.
 
 The LLM should help classify, summarize, and reason over ambiguous customer
