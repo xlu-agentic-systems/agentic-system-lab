@@ -59,14 +59,12 @@ class OpenAILlmClient:
     def _get_client(self):
         if self._client is None:
             try:
-                from dotenv import load_dotenv
                 from openai import AsyncOpenAI
             except ImportError as exc:
                 raise RuntimeError(
                     "The openai package is required for LLM calls. Install project dependencies with "
                     '`pip install -e ".[dev]"`.'
                 ) from exc
-            load_dotenv()
             self._client = AsyncOpenAI()
         return self._client
 
@@ -93,6 +91,9 @@ def _extract_parsed_response(response):
 class RuleBasedLlmClient:
     """Deterministic LLM substitute for unit tests and offline demos."""
 
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     async def parse(
         self,
         *,
@@ -112,6 +113,7 @@ class RuleBasedLlmClient:
 
         message = str(user_payload.get("message", ""))
         text = message.lower()
+        self.calls.append(task_name)
 
         if response_model is OrchestratorDecision:
             selected = []
@@ -151,6 +153,7 @@ class RuleBasedLlmClient:
                         "item_id": item_match.group(0).lower() if item_match else None,
                         "return_reason": _rule_based_return_reason(text),
                         "refund_requested": any(term in text for term in ("refund", "return", "money back")),
+                        "product_hint": _rule_based_product_hint(text),
                     },
                     "missing_fields": [],
                     "clarification_question": None,
@@ -383,4 +386,21 @@ def _rule_based_return_response(payload: dict) -> str:
         return "Your return appears eligible, but the refund was not issued because backend validation did not approve the tool call."
     if planner["status"] == "rejected":
         return f"I cannot approve this refund because {', '.join(planner['reason_codes'])}."
+    policy_result = next(
+        (
+            result
+            for result in tool_results
+            if result["proposal"]["name"] == "get_return_policy" and result["ok"]
+        ),
+        None,
+    )
+    if policy_result and policy_result.get("result"):
+        return policy_result["result"].get("notes", planner["explanation"])
     return planner["explanation"]
+
+
+def _rule_based_product_hint(text: str) -> str | None:
+    for hint in ("shoes", "shoe", "sneakers", "headphones", "mug", "apparel", "electronics", "clearance"):
+        if hint in text:
+            return hint
+    return None

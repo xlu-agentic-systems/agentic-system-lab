@@ -35,8 +35,12 @@ def test_return_chatbot_asks_for_missing_fields(tmp_path: Path) -> None:
 
 
 def test_return_chatbot_issues_valid_refund(tmp_path: Path) -> None:
+    llm_client = RuleBasedLlmClient()
     response = run(
-        service(tmp_path).handle_message(
+        ReturnConversationService(
+            session_store=JsonSessionStore(tmp_path / "sessions.json"),
+            llm_client=llm_client,
+        ).handle_message(
             ReturnConversationRequest(
                 session_id="approved",
                 user_id="user-1",
@@ -49,6 +53,11 @@ def test_return_chatbot_issues_valid_refund(tmp_path: Path) -> None:
     assert response.tool_results[-1].proposal.name == "issue_refund"
     assert response.tool_results[-1].ok is True
     assert "approved" in response.response
+    assert llm_client.calls == [
+        "return_routing_agent",
+        "return_planner_agent",
+        "return_qa_agent",
+    ]
 
 
 def test_return_chatbot_rejects_cross_user_order(tmp_path: Path) -> None:
@@ -65,3 +74,21 @@ def test_return_chatbot_rejects_cross_user_order(tmp_path: Path) -> None:
     assert response.planner.status == "rejected"
     assert response.planner.reason_codes == ["order_not_owned_by_user"]
     assert response.tool_results == []
+
+
+def test_return_policy_question_does_not_issue_refund(tmp_path: Path) -> None:
+    response = run(
+        service(tmp_path).handle_message(
+            ReturnConversationRequest(
+                session_id="policy",
+                user_id="user-1",
+                message="What is the return policy for shoes?",
+            )
+        )
+    )
+
+    assert response.routing.intent == "return_policy_question"
+    assert response.planner.reason_codes == ["policy_information_only"]
+    assert [result.proposal.name for result in response.tool_results] == ["get_return_policy"]
+    assert all(result.proposal.name != "issue_refund" for result in response.tool_results)
+    assert "Apparel is refundable" in response.response

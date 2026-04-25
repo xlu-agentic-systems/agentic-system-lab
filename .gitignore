@@ -3,4 +3,5 @@ __pycache__/
 .pytest_cache/
 .venv/
 data/sessions.json
+project1_multi_agent_return_bot/data/sessions.json
 *.egg-info/

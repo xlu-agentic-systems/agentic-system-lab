@@ -61,6 +61,28 @@ class PlannerAgent:
                 explanation=routing.clarification_question or "More information is needed.",
                 proposed_tool_calls=[],
             )
+        if routing.intent == "return_policy_question":
+            category = _policy_category_for_context(self.catalog, routing.extracted_fields)
+            return PlannerOutput(
+                status="needs_clarification",
+                reason_codes=["policy_information_only"],
+                explanation="Policy questions are answered without executing a refund.",
+                proposed_tool_calls=[
+                    ToolCallProposal(
+                        name="get_return_policy",
+                        args={"category": category},
+                        safety="read_only",
+                        reason="Retrieve policy text for the requested category.",
+                    )
+                ],
+            )
+        if routing.intent != "return_request":
+            return PlannerOutput(
+                status="escalated",
+                reason_codes=["unsupported_return_bot_intent"],
+                explanation="I can help with return requests and return policy questions.",
+                proposed_tool_calls=[],
+            )
 
         facts = _load_planner_facts(self.catalog, routing.extracted_fields, user_id)
         output = await self.llm_client.parse(
@@ -207,7 +229,12 @@ def _normalize_planner_output(output: PlannerOutput, routing: RoutingOutput, fac
         )
 
     eligibility = facts.get("eligibility") or {}
-    eligible = bool(eligibility.get("eligible")) and bool(facts.get("user_owns_order"))
+    eligible = (
+        routing.intent == "return_request"
+        and bool(context.return_reason)
+        and bool(eligibility.get("eligible"))
+        and bool(facts.get("user_owns_order"))
+    )
     if not eligible:
         proposals = [call for call in proposals if call.name != "issue_refund"]
     elif not any(call.name == "issue_refund" for call in proposals):
@@ -225,3 +252,18 @@ def _normalize_planner_output(output: PlannerOutput, routing: RoutingOutput, fac
         )
 
     return output.model_copy(update={"proposed_tool_calls": proposals})
+
+
+def _policy_category_for_context(catalog: Catalog, context: ReturnContext) -> str:
+    if context.order_id and context.item_id:
+        item = catalog.get_order_item(context.order_id, context.item_id)
+        product = catalog.get_product(item.product_id) if item else None
+        if product:
+            return product.category
+    if context.product_hint:
+        hint = context.product_hint.lower()
+        for product in catalog.products.values():
+            terms = [product.name.lower(), product.category.lower(), *product.aliases]
+            if any(hint in term or term in hint for term in terms):
+                return product.category
+    return "electronics"

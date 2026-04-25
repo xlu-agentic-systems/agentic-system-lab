@@ -6,8 +6,11 @@ from pathlib import Path
 from app.models import SessionState
 
 
+DEFAULT_SESSION_PATH = Path(__file__).resolve().parent.parent / "data" / "sessions.json"
+
+
 class JsonSessionStore:
-    def __init__(self, path: Path | str = "data/sessions.json") -> None:
+    def __init__(self, path: Path | str = DEFAULT_SESSION_PATH) -> None:
         self.path = Path(path)
 
     async def load(self, session_id: str, user_id: str) -> SessionState:

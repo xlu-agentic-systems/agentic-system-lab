@@ -1,7 +1,7 @@
 [project]
 name = "agentic-system-lab"
 version = "0.1.0"
-description = "Small customer-support agent orchestrator prototype"
+description = "Agentic system lab projects"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
@@ -17,5 +17,5 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
+testpaths = ["project1_multi_agent_return_bot/tests"]
+pythonpath = ["project1_multi_agent_return_bot"]

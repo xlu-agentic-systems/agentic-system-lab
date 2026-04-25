@@ -2,12 +2,11 @@
 
 ## Current Runtime Model
 
-This prototype now calls OpenAI models at runtime. Both local agent flows use
+Project 1 calls OpenAI models at runtime. The return-chatbot agents use
 `OpenAILlmClient`, which calls the Responses API and parses Pydantic structured
 outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
-- `POST /chat`: an orchestrator-led support flow
 
 Set `OPENAI_API_KEY` before running the API. `OPENAI_MODEL` defaults to
 `gpt-5.5` and can be overridden for evals or cost/latency tradeoffs.
@@ -62,7 +61,7 @@ The orchestrator is useful when the request can span domains:
 request -> select specialists -> choose execution mode -> aggregate -> respond
 ```
 
-That is represented by the support orchestrator at `POST /chat`.
+That is represented by the Project 2 support orchestrator workstream.
 
 The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
