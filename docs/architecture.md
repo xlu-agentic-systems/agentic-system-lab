@@ -28,16 +28,6 @@ The return chatbot is implemented in
 6. Run LLM-backed `QAAgent` to explain approval, rejection, escalation, or policy information.
 7. Save updated session state.
 
-Agents are logical roles that call OpenAI through `OpenAILlmClient`. Unit tests
-inject `RuleBasedLlmClient` for deterministic offline coverage, but the default
-runtime path uses the OpenAI Responses API with Pydantic structured outputs.
-
-## Safety Boundary
-
-Refunds are unsafe writes. The planner can propose `issue_refund`, but
-`validate_and_execute_tool` independently verifies order existence, ownership,
-item membership, refundable status, exact refund amount, and policy eligibility.
-
 Policy and status questions do not enter refund execution. Refund tool proposals
 are normalized out unless the routing intent is a confirmed `return_request` with
 the required return context.
@@ -60,6 +50,13 @@ runtime path calls the OpenAI Responses API for the orchestration decision and
 for each specialist `AgentResult`. Tests inject `RuleBasedLlmClient` and include
 an explicit assertion that the orchestrator hits the LLM boundary.
 
-Backend tools remain deterministic. The model proposes actions and summaries;
-the backend owns session persistence, execution planning, validation, and
+## Shared Safety Boundary
+
+Agents are logical roles that call OpenAI through `OpenAILlmClient`. The model
+classifies, plans, proposes actions, and summarizes; backend tools remain
+deterministic and own validation, session persistence, execution planning, and
 side-effect control.
+
+Refunds and payment changes are unsafe writes. Backend validation independently
+verifies order existence, ownership, item membership, exact amounts, and policy
+eligibility before any write is executed.

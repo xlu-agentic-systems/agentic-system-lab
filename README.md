@@ -18,4 +18,5 @@ agentic-system-lab/
 - `project3_adaptive_eval_system`: reserved for the adaptive eval system workstream.
 
 Shared architecture notes live in `docs/`. Project-specific implementation and
-tests live inside each project folder.
+tests live inside each project folder so PRs can coexist without competing over a
+root-level `app/` package.
