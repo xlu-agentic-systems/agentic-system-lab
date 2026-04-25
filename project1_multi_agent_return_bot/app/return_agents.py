@@ -42,7 +42,11 @@ class RoutingAgent:
             response_model=RoutingOutput,
         )
         output = _normalize_routing_output(output, state.context)
-        logger.info("return routing decision: %s", output.model_dump(mode="json"))
+        logger.info(
+            "return routing decision: intent=%s missing_fields=%s",
+            output.intent,
+            output.missing_fields,
+        )
         return output
 
 
@@ -103,7 +107,12 @@ class PlannerAgent:
             response_model=PlannerOutput,
         )
         output = _normalize_planner_output(output, routing, facts)
-        logger.info("return planner decision: %s", output.model_dump(mode="json"))
+        logger.info(
+            "return planner decision: status=%s reason_codes=%s proposed_tool_count=%s",
+            output.status,
+            output.reason_codes,
+            len(output.proposed_tool_calls),
+        )
         return output
 
 

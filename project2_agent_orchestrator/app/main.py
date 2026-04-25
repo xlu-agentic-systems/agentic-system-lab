@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI
 
+from agentic_system_lab.observability import configure_observability_logging
 from project2_agent_orchestrator.app.models import ConversationRequest, ConversationResponse
 from project2_agent_orchestrator.app.service import ConversationService
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+configure_observability_logging(project="project2")
 
 app = FastAPI(title="Customer Support Agent Orchestrator")
 service = ConversationService()

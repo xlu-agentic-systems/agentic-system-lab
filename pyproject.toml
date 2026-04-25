@@ -22,6 +22,7 @@ dev = [
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
 testpaths = [
+  "tests",
   "benchmarks/tests",
   "project1_multi_agent_return_bot/tests",
   "project2_agent_orchestrator/tests",

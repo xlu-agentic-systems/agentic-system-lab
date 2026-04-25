@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from agentic_system_lab.observability import log_agent_event
 from project3_adaptive_eval_system.app.agents import (
     EvaluationAgent,
     PromptImprovementAgent,
@@ -23,6 +25,7 @@ from project3_adaptive_eval_system.app.store import (
 
 
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "evaluation_report.md"
+logger = logging.getLogger(__name__)
 
 
 class EvaluationService:
@@ -46,6 +49,13 @@ class EvaluationService:
 
     async def run_evaluation(self, trace_limit: int | None = None) -> EvaluationRunResult:
         traces = self.trace_store.load_traces(trace_limit)
+        log_agent_event(
+            logger,
+            event="evaluation_run_started",
+            message="project3 evaluation run started",
+            agent="evaluation_service",
+            attributes={"trace_count": len(traces), "trace_limit": trace_limit},
+        )
         evaluations: list[EvaluationResult] = []
         generated_tests: list[GeneratedTestCase] = []
         prompt_patches: list[PromptPatch] = []
@@ -54,10 +64,33 @@ class EvaluationService:
             evaluation = await self.evaluation_agent.run(trace)
             evaluation = _normalize_evaluation(evaluation)
             evaluations.append(evaluation)
+            log_agent_event(
+                logger,
+                event="agent_decision",
+                message="project3 evaluation agent scored trace",
+                agent="evaluation_agent",
+                session_id=trace.session_id,
+                status="passed" if evaluation.passed else "failed",
+                attributes={
+                    "trace_id": trace.trace_id,
+                    "overall_score": evaluation.overall_score,
+                    "issue_count": len(evaluation.detected_issues),
+                    "requires_regression": evaluation.requires_regression,
+                },
+            )
             if not evaluation.requires_regression:
                 continue
             generated_tests.append(await self.test_case_generator.run(trace, evaluation))
             prompt_patches.append(await self.prompt_improvement_agent.run(trace, evaluation))
+            log_agent_event(
+                logger,
+                event="agent_decision",
+                message="project3 improvement agents proposed regression artifacts",
+                agent="prompt_improvement_agent",
+                session_id=trace.session_id,
+                status="prompt_patch_proposed",
+                attributes={"trace_id": trace.trace_id},
+            )
 
         self.generated_test_store.save_tests(generated_tests)
         prompt_patches = self.prompt_patch_store.save_patches(prompt_patches)

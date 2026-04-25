@@ -113,3 +113,34 @@ def test_sequential_shipping_payment_flow_escalates(tmp_path: Path) -> None:
     assert response.agent_results[-1].agent == "escalation_agent"
     assert response.agent_results[-1].backend_actions[0].ok is True
     assert "support ticket" in response.final_response
+
+
+def test_observability_logs_escalation_and_backend_actions(tmp_path: Path, monkeypatch) -> None:
+    events = []
+
+    def capture(_logger, **kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr("project2_agent_orchestrator.app.service.log_agent_event", capture)
+
+    response = run(
+        service(tmp_path).handle_message(
+            ConversationRequest(
+                session_id="observable-sequential",
+                user_id="user-1",
+                message="My package order-1004 is delayed and I want a refund status update.",
+            )
+        )
+    )
+
+    assert response.agent_results[-1].agent == "escalation_agent"
+    assert any(
+        event["event"] == "agent_decision" and event.get("agent") == "escalation_agent"
+        for event in events
+    )
+    assert any(
+        event["event"] == "tool_execution"
+        and event.get("tool_name") == "create_support_ticket"
+        and event.get("status") == "executed"
+        for event in events
+    )

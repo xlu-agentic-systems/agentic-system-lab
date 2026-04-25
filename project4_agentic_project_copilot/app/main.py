@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from agentic_system_lab.observability import configure_observability_logging
 from project4_agentic_project_copilot.app.models import (
     ChatRequest,
     ChatResponse,
@@ -17,6 +18,8 @@ from project4_agentic_project_copilot.app.service import ProjectCopilotService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+configure_observability_logging(project="project4")
 
 app = FastAPI(title="Agentic Project Copilot")
 service: ProjectCopilotService | None = None

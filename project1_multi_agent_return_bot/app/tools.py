@@ -133,7 +133,7 @@ async def validate_and_execute_tool(
     *,
     user_id: str,
 ) -> ToolExecutionResult:
-    logger.info("tool proposal: %s args=%s", proposal.name, proposal.args)
+    logger.info("tool proposal: %s", proposal.name)
     try:
         args = _tool_args(proposal)
         _validate_proposal_shape(proposal)
@@ -221,7 +221,7 @@ async def validate_and_execute_action(
     *,
     user_id: str,
 ) -> BackendActionResult:
-    logger.info("backend action proposal: %s args=%s", action.name, action.args)
+    logger.info("backend action proposal: %s", action.name)
     try:
         if action.name != "create_support_ticket":
             raise ToolValidationError("only support tickets can be executed automatically")

@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI
 
+from agentic_system_lab.observability import configure_observability_logging
 from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest, ReturnConversationResponse
 from project1_multi_agent_return_bot.app.return_service import ReturnConversationService
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+configure_observability_logging(project="project1")
 
 app = FastAPI(title="E-commerce Return Chatbot")
 return_service = ReturnConversationService()

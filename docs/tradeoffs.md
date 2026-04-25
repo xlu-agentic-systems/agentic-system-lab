@@ -60,7 +60,7 @@ itself. It creates artifacts that humans can review and apply later.
 
 ## Structured Outputs
 
-All three projects use Pydantic structured outputs through the OpenAI Responses
+All four projects use Pydantic structured outputs through the OpenAI Responses
 API. This gives the backend typed contracts for agent outputs.
 
 Tradeoffs:
@@ -74,12 +74,13 @@ Tradeoffs:
 
 ## Tool Safety
 
-Projects 1 and 2 expose fake backend tools. The important design choice is that
-the LLM proposes, while backend code validates and executes.
+Projects 1, 2, and 4 expose fake backend tools. The important design choice is
+that the LLM proposes, while backend code validates and executes.
 
 Project 1 validates refunds before execution. Project 2 only auto-executes safe
 support-ticket creation; unsafe payment changes remain proposed. Project 3 does
-not execute production tools at all.
+not execute production tools at all. Project 4 requires confirmation before
+state-changing task APIs and only executes read-only task search directly.
 
 The tradeoff is extra backend code, but that code is what makes the architecture
 defensible: policy, ownership, amount checks, and approval status are not left to
