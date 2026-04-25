@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from app.models import AccountProfile, Order, Payment, Product, ReturnPolicy, Shipment
+from project1_multi_agent_return_bot.app.models import AccountProfile, Order, Payment, Product, ReturnPolicy, Shipment
 
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_data.json"

@@ -4,8 +4,8 @@ import argparse
 import asyncio
 import logging
 
-from app.models import ConversationRequest
-from app.service import ConversationService
+from project2_agent_orchestrator.app.models import ConversationRequest
+from project2_agent_orchestrator.app.service import ConversationService
 
 
 async def run_cli(session_id: str, user_id: str) -> None:

@@ -1,10 +1,10 @@
 import asyncio
 from pathlib import Path
 
-from app.llm import RuleBasedLlmClient
-from app.models import ConversationRequest
-from app.service import ConversationService
-from app.session_store import JsonSessionStore
+from project2_agent_orchestrator.app.llm import RuleBasedLlmClient
+from project2_agent_orchestrator.app.models import ConversationRequest
+from project2_agent_orchestrator.app.service import ConversationService
+from project2_agent_orchestrator.app.session_store import JsonSessionStore
 
 
 def run(coro):

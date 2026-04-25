@@ -4,8 +4,8 @@ import logging
 
 from fastapi import FastAPI
 
-from app.models import ConversationRequest, ConversationResponse
-from app.service import ConversationService
+from project2_agent_orchestrator.app.models import ConversationRequest, ConversationResponse
+from project2_agent_orchestrator.app.service import ConversationService
 
 
 logging.basicConfig(

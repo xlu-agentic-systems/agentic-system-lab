@@ -1,131 +1,62 @@
 # Architecture
 
-## Core Flow
+## Repository Layout
 
-The orchestrator is implemented in `app/service.py`. It loads session state,
-routes the message through an OpenAI-backed structured-output client, builds an
-execution plan, runs specialist agents, optionally adds escalation, validates
-backend actions, aggregates the final answer, and saves session state.
-
-Domain agents are stateless. They receive `message`, `user_id`, and the loaded
-session context, fetch backend facts, then ask the LLM to return a Pydantic
-`AgentResult`. Tests inject `RuleBasedLlmClient` for deterministic offline
-coverage; production services default to `OpenAILlmClient`, which calls the
-OpenAI Responses API.
-
-## Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant API as FastAPI /chat
-    participant O as OrchestratorService
-    participant S as JsonSessionStore
-    participant A as Specialist Agents
-    participant T as BackendTools
-
-    C->>API: POST /chat(session_id, user_id, message)
-    API->>O: handle_message(request)
-    O->>S: load(session_id, user_id)
-    S-->>O: SessionState
-    O->>O: LLM selects agents and execution mode
-    alt single_agent
-        O->>A: run one specialist
-    else sequential
-        O->>A: run specialist 1
-        A-->>O: AgentResult
-        O->>A: run specialist 2
-    else parallel
-        par independent specialists
-            O->>A: run specialist A
-            O->>A: run specialist B
-        end
-    end
-    A->>T: read fake order/payment/shipping/account data
-    T-->>A: structured facts
-    A-->>O: AgentResult
-    opt low confidence, disagreement, or sensitive change
-        O->>A: escalation_agent.run(prior_results)
-        A-->>O: ticket proposal
-        O->>T: validate_and_execute_action(create_support_ticket)
-    end
-    O->>O: aggregate coherent response
-    O->>S: save(updated SessionState)
-    O-->>API: ConversationResponse JSON
-    API-->>C: selected agents, plan, results, response, trace
-```
-
-## Example Traces
-
-### Single Agent
-
-Request:
+Projects are isolated by folder so independent PRs can coexist without sharing a
+root-level `app/` package:
 
 ```text
-Where is package order-1004?
+agentic-system-lab/
+  project1_multi_agent_return_bot/
+  project2_agent_orchestrator/
+  project3_adaptive_eval_system/
+  docs/
+  prompts/
 ```
 
-Trace:
+## Project 1: Return Chatbot
 
-```json
-{
-  "selected_agents": ["shipping_agent"],
-  "execution_plan": {"mode": "single_agent"},
-  "agent_results": ["shipping_agent: shipment_delayed"],
-  "final_response": "Order order-1004 is delayed with FedEx..."
-}
-```
+The return chatbot is implemented in
+`project1_multi_agent_return_bot/app/return_service.py` and exposed at
+`POST /returns/chat`.
 
-### Multi-Agent Parallel
+1. Load session state from `JsonSessionStore`.
+2. Run LLM-backed `RoutingAgent` to classify intent and extract structured fields.
+3. Ask for clarification if a return request is missing order ID, item ID, or return reason.
+4. Run LLM-backed `PlannerAgent` with backend order, item, and policy facts.
+5. Execute proposed tool calls through backend validation.
+6. Run LLM-backed `QAAgent` to explain approval, rejection, escalation, or policy information.
+7. Save updated session state.
 
-Request:
+Policy and status questions do not enter refund execution. Refund tool proposals
+are normalized out unless the routing intent is a confirmed `return_request` with
+the required return context.
 
-```text
-I was charged twice and I also want to return the shoes.
-```
+## Project 2: Agent Orchestrator
 
-Trace:
+The support orchestrator is implemented in
+`project2_agent_orchestrator/app/service.py` and exposed at `POST /chat`.
 
-```json
-{
-  "selected_agents": ["return_agent", "payment_agent"],
-  "execution_plan": {"mode": "parallel"},
-  "agent_results": ["return_agent: return_eligible", "payment_agent: duplicate_charge_found"],
-  "final_response": "City Runner Shoes is eligible for return... I found a likely duplicate charge..."
-}
-```
+1. Load session state from `JsonSessionStore`.
+2. Run LLM-backed orchestration to select specialist agents and an execution mode.
+3. Merge model-extracted context with deterministic ID extraction.
+4. Run selected specialists as `single_agent`, `sequential`, or `parallel`.
+5. Add escalation when specialist confidence is low, results disagree, or a sensitive change is requested.
+6. Execute only validated safe backend actions automatically.
+7. Aggregate specialist results into one customer-facing response.
 
-### Multi-Agent Sequential
+Project 2 uses the same `OpenAILlmClient` pattern as Project 1. The default
+runtime path calls the OpenAI Responses API for the orchestration decision and
+for each specialist `AgentResult`. Tests inject `RuleBasedLlmClient` and include
+an explicit assertion that the orchestrator hits the LLM boundary.
 
-Request:
+## Shared Safety Boundary
 
-```text
-My package order-1004 is delayed and I want a refund status update.
-```
+Agents are logical roles that call OpenAI through `OpenAILlmClient`. The model
+classifies, plans, proposes actions, and summarizes; backend tools remain
+deterministic and own validation, session persistence, execution planning, and
+side-effect control.
 
-Trace:
-
-```json
-{
-  "selected_agents": ["shipping_agent", "payment_agent"],
-  "execution_plan": {"mode": "sequential"},
-  "agent_results": [
-    "shipping_agent: shipment_delayed",
-    "payment_agent: refund_timeline",
-    "escalation_agent: human_ticket_recommended"
-  ],
-  "final_response": "Order order-1004 is delayed... I created support ticket ..."
-}
-```
-
-## Safety Boundary
-
-Specialist agents do not execute irreversible changes. They return structured
-proposals. The orchestrator/backend layer decides whether a proposed action is
-allowed. Unsafe payment actions remain pending for approval.
-
-## Session Isolation
-
-`JsonSessionStore` keys state by `session_id`, and each request also includes
-`user_id`. Agents do not retain in-memory user state; context is loaded at the
-start of a request and saved at the end.
+Refunds and payment changes are unsafe writes. Backend validation independently
+verifies order existence, ownership, item membership, exact amounts, and policy
+eligibility before any write is executed.

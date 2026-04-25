@@ -1,0 +1,212 @@
+{
+  "today": "2026-04-24",
+  "users": [
+    {
+      "user_id": "user-1",
+      "name": "Avery Chen",
+      "email": "avery@example.com",
+      "default_address": "101 Market St, San Francisco, CA",
+      "login_mfa_enabled": true
+    },
+    {
+      "user_id": "user-2",
+      "name": "Jordan Lee",
+      "email": "jordan@example.com",
+      "default_address": "22 Oak Ave, Portland, OR",
+      "login_mfa_enabled": false
+    }
+  ],
+  "products": [
+    {
+      "product_id": "prod-headphones",
+      "name": "Noise Canceling Headphones",
+      "category": "electronics",
+      "final_sale": false
+    },
+    {
+      "product_id": "prod-jacket",
+      "name": "Trail Rain Jacket",
+      "category": "apparel",
+      "final_sale": false
+    },
+    {
+      "product_id": "prod-shoes",
+      "name": "City Runner Shoes",
+      "category": "apparel",
+      "final_sale": false,
+      "aliases": ["shoe", "shoes", "sneakers"]
+    },
+    {
+      "product_id": "prod-clearance-mug",
+      "name": "Clearance Ceramic Mug",
+      "category": "clearance",
+      "final_sale": true
+    }
+  ],
+  "return_policies": [
+    {
+      "category": "electronics",
+      "window_days": 30,
+      "allow_refunds": true,
+      "notes": "Electronics are refundable within 30 days of delivery if the item is refundable."
+    },
+    {
+      "category": "apparel",
+      "window_days": 45,
+      "allow_refunds": true,
+      "notes": "Apparel is refundable within 45 days of delivery if the item is refundable."
+    },
+    {
+      "category": "clearance",
+      "window_days": 0,
+      "allow_refunds": false,
+      "notes": "Clearance final-sale items are not refundable."
+    }
+  ],
+  "orders": [
+    {
+      "order_id": "order-1001",
+      "user_id": "user-1",
+      "status": "delivered",
+      "delivered_at": "2026-04-10",
+      "items": [
+        {
+          "item_id": "item-1",
+          "product_id": "prod-headphones",
+          "quantity": 1,
+          "unit_price": "129.99",
+          "refundable": true
+        },
+        {
+          "item_id": "item-2",
+          "product_id": "prod-clearance-mug",
+          "quantity": 2,
+          "unit_price": "8.50",
+          "refundable": false
+        }
+      ]
+    },
+    {
+      "order_id": "order-1002",
+      "user_id": "user-1",
+      "status": "delivered",
+      "delivered_at": "2026-02-01",
+      "items": [
+        {
+          "item_id": "item-3",
+          "product_id": "prod-jacket",
+          "quantity": 1,
+          "unit_price": "89.00",
+          "refundable": true
+        }
+      ]
+    },
+    {
+      "order_id": "order-1003",
+      "user_id": "user-1",
+      "status": "delivered",
+      "delivered_at": "2026-04-18",
+      "items": [
+        {
+          "item_id": "item-5",
+          "product_id": "prod-shoes",
+          "quantity": 1,
+          "unit_price": "74.00",
+          "refundable": true
+        }
+      ]
+    },
+    {
+      "order_id": "order-1004",
+      "user_id": "user-1",
+      "status": "shipped",
+      "delivered_at": null,
+      "items": [
+        {
+          "item_id": "item-6",
+          "product_id": "prod-headphones",
+          "quantity": 1,
+          "unit_price": "129.99",
+          "refundable": true
+        }
+      ]
+    },
+    {
+      "order_id": "order-2001",
+      "user_id": "user-2",
+      "status": "delivered",
+      "delivered_at": "2026-04-18",
+      "items": [
+        {
+          "item_id": "item-4",
+          "product_id": "prod-headphones",
+          "quantity": 1,
+          "unit_price": "129.99",
+          "refundable": true
+        }
+      ]
+    }
+  ],
+  "shipments": [
+    {
+      "shipment_id": "ship-1",
+      "order_id": "order-1003",
+      "carrier": "UPS",
+      "tracking_number": "1Z1003",
+      "status": "delivered",
+      "estimated_delivery": "2026-04-18",
+      "last_update": "Delivered to front door."
+    },
+    {
+      "shipment_id": "ship-2",
+      "order_id": "order-1004",
+      "carrier": "FedEx",
+      "tracking_number": "FEDEX1004",
+      "status": "delayed",
+      "estimated_delivery": "2026-04-26",
+      "last_update": "Weather delay at regional hub."
+    }
+  ],
+  "payments": [
+    {
+      "payment_id": "pay-1",
+      "order_id": "order-1003",
+      "user_id": "user-1",
+      "amount": "74.00",
+      "status": "captured",
+      "method": "visa ending 4242",
+      "created_at": "2026-04-17T15:20:00",
+      "duplicate_group": "dup-shoes-1003"
+    },
+    {
+      "payment_id": "pay-2",
+      "order_id": "order-1003",
+      "user_id": "user-1",
+      "amount": "74.00",
+      "status": "captured",
+      "method": "visa ending 4242",
+      "created_at": "2026-04-17T15:21:00",
+      "duplicate_group": "dup-shoes-1003"
+    },
+    {
+      "payment_id": "pay-3",
+      "order_id": "order-1004",
+      "user_id": "user-1",
+      "amount": "129.99",
+      "status": "captured",
+      "method": "visa ending 4242",
+      "created_at": "2026-04-21T09:00:00",
+      "duplicate_group": null
+    },
+    {
+      "payment_id": "pay-4",
+      "order_id": "order-2001",
+      "user_id": "user-2",
+      "amount": "129.99",
+      "status": "captured",
+      "method": "mastercard ending 1111",
+      "created_at": "2026-04-18T10:30:00",
+      "duplicate_group": null
+    }
+  ]
+}

@@ -4,8 +4,8 @@ import asyncio
 import logging
 import re
 
-from app.llm import LlmClient, OpenAILlmClient
-from app.models import (
+from project2_agent_orchestrator.app.llm import LlmClient, OpenAILlmClient
+from project2_agent_orchestrator.app.models import (
     AgentName,
     AgentResult,
     ChatMessage,
@@ -18,8 +18,8 @@ from app.models import (
     ReturnContext,
     TraceEvent,
 )
-from app.session_store import JsonSessionStore
-from app.tools import BackendTools, validate_and_execute_action
+from project2_agent_orchestrator.app.session_store import JsonSessionStore
+from project2_agent_orchestrator.app.tools import BackendTools, validate_and_execute_action
 
 
 logger = logging.getLogger(__name__)
