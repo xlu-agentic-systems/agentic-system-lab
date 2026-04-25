@@ -2,10 +2,11 @@
 
 Small FastAPI prototype for a customer-support agent orchestrator.
 
-The project demonstrates an orchestrator-led architecture: the backend receives a
-support request, selects one or more specialist agents, chooses `single_agent`,
-`sequential`, or `parallel` execution, validates structured agent outputs, and
-returns one coherent JSON response.
+The project demonstrates an LLM-backed orchestrator-led architecture: the
+backend receives a support request, asks an OpenAI model for a structured
+orchestration decision, runs one or more specialist agents through the same LLM
+boundary, chooses `single_agent`, `sequential`, or `parallel` execution,
+validates structured agent outputs, and returns one coherent JSON response.
 
 ## Why Orchestration
 
@@ -36,6 +37,8 @@ The backend owns execution and validation.
 
 ```bash
 pip install -e ".[dev]"
+export OPENAI_API_KEY="..."
+# optional: export OPENAI_MODEL="gpt-5.5"
 uvicorn app.main:app --reload
 ```
 
@@ -70,3 +73,5 @@ pytest -q
 ```
 
 Coverage includes routing, aggregation, policy checks, and backend refund safety.
+Unit tests inject a deterministic `RuleBasedLlmClient`; the default runtime path
+uses `OpenAILlmClient` and makes real Responses API calls.

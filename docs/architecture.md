@@ -3,14 +3,15 @@
 ## Core Flow
 
 The orchestrator is implemented in `app/service.py`. It loads session state,
-routes the message with deterministic keyword rules, builds an execution plan,
-runs specialist agents, optionally adds escalation, validates backend actions,
-aggregates the final answer, and saves session state.
+routes the message through an OpenAI-backed structured-output client, builds an
+execution plan, runs specialist agents, optionally adds escalation, validates
+backend actions, aggregates the final answer, and saves session state.
 
 Domain agents are stateless. They receive `message`, `user_id`, and the loaded
-session context, then return a Pydantic `AgentResult`. In PR #1 the agents are
-deterministic Python classes; the architecture boundary is intentionally shaped
-so an LLM adapter can later return the same structured models.
+session context, fetch backend facts, then ask the LLM to return a Pydantic
+`AgentResult`. Tests inject `RuleBasedLlmClient` for deterministic offline
+coverage; production services default to `OpenAILlmClient`, which calls the
+OpenAI Responses API.
 
 ## Sequence Diagram
 
@@ -27,7 +28,7 @@ sequenceDiagram
     API->>O: handle_message(request)
     O->>S: load(session_id, user_id)
     S-->>O: SessionState
-    O->>O: select agents and execution mode
+    O->>O: LLM selects agents and execution mode
     alt single_agent
         O->>A: run one specialist
     else sequential

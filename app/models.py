@@ -98,6 +98,13 @@ class ExecutionPlan(BaseModel):
     reason: str
 
 
+class OrchestratorDecision(BaseModel):
+    selected_agents: list[AgentName]
+    execution_mode: ExecutionMode
+    extracted_context: ReturnContext = Field(default_factory=ReturnContext)
+    reasoning: str
+
+
 class ProposedAction(BaseModel):
     name: str
     args: dict[str, Any] = Field(default_factory=dict)
