@@ -8,6 +8,7 @@ from project1_multi_agent_return_bot.app.return_agents import PlannerAgent, QAAg
 from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest, ReturnConversationResponse
 from project1_multi_agent_return_bot.app.session_store import JsonSessionStore
 from project1_multi_agent_return_bot.app.tools import BackendTools, validate_and_execute_tool
+from project1_multi_agent_return_bot.app.trace_store import JsonlTraceStore, ReturnConversationTrace
 
 
 logger = logging.getLogger(__name__)
@@ -18,10 +19,12 @@ class ReturnConversationService:
         self,
         *,
         session_store: JsonSessionStore | None = None,
+        trace_store: JsonlTraceStore | None = None,
         tools: BackendTools | None = None,
         llm_client: LlmClient | None = None,
     ) -> None:
         self.session_store = session_store or JsonSessionStore()
+        self.trace_store = trace_store or JsonlTraceStore()
         self.tools = tools or BackendTools()
         self.llm_client = llm_client or OpenAILlmClient()
         self.routing_agent = RoutingAgent(self.llm_client)
@@ -50,6 +53,17 @@ class ReturnConversationService:
         state.history.append(ChatMessage(role="assistant", content=response))
         state.last_status = planner.status
         await self.session_store.save(state)
+        await self.trace_store.append(
+            ReturnConversationTrace(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                user_message=request.message,
+                response=response,
+                routing=routing,
+                planner=planner,
+                tool_results=tool_results,
+            )
+        )
 
         logger.info("return chatbot final response: %s", response)
         return ReturnConversationResponse(

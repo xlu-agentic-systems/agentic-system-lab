@@ -4,8 +4,8 @@ Small FastAPI prototype for an LLM-backed e-commerce return workflow.
 
 The main interview project in this branch is a multi-agent e-commerce return
 chatbot available at `POST /returns/chat`. It demonstrates routing, planning,
-Q&A response generation, backend tool proposals, session persistence, and safe
-refund validation.
+Q&A response generation, backend tool proposals, active session persistence,
+durable trace capture, and safe refund validation.
 
 The runtime agents call OpenAI models through the Responses API with Pydantic
 structured outputs. Unit tests inject `RuleBasedLlmClient` so tests stay
@@ -21,6 +21,39 @@ deterministic and do not require network access.
 - `QAAgent`: turns planner decisions and tool results into customer-facing
   support replies.
 - `BackendTools`: validates every proposed tool call before execution.
+
+## Session And Trace Storage
+
+Project 1 now separates active conversation state from durable audit traces.
+
+Active sessions are stored by `JsonSessionStore` in:
+
+```text
+project1_multi_agent_return_bot/data/sessions.json
+```
+
+This prototype store behaves like a small file-backed equivalent of a Redis
+session cache:
+
+- sessions are keyed by `user_id:session_id`
+- sessions carry `created_at`, `updated_at`, `expires_at`, and `status`
+- the default TTL is 24 hours
+- expired sessions load as fresh empty sessions
+- the same `session_id` cannot leak history across different `user_id` values
+
+Durable per-turn traces are stored by `JsonlTraceStore` in:
+
+```text
+project1_multi_agent_return_bot/data/conversation_traces.jsonl
+```
+
+Each trace records the user message, routing output, planner output, validated
+tool results, and final response. In production, the analogous design would use
+Redis or another low-latency key-value store for active sessions, and a durable
+database such as Postgres, DynamoDB, MongoDB, or a data lake table for traces.
+A vector database is not the source of truth for active sessions; it is only
+useful for semantic retrieval over policies, knowledge base content, or older
+conversation summaries.
 
 ## Run
 
