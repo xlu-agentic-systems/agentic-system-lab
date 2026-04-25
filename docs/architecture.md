@@ -436,5 +436,12 @@ RAG is one capability path, not the whole system. The copilot also inspects a
 local SQLite schema, generates read-only SQL, validates it before execution, and
 requires confirmation before state-changing project API tools run.
 
+The file RAG path persists uploaded document metadata, extracted chunks, and
+JSON embeddings in local SQLite. The UI document library can list, select, and
+delete stored documents. Upload and delete operations recompute embeddings for
+stored chunks so the local vector store remains consistent with the document
+tables.
+
 See `project4_agentic_project_copilot/docs/architecture.md` for the detailed
-architecture.
+architecture, and `docs/project4_rag_pipeline.md` for the end-to-end RAG
+pipeline.

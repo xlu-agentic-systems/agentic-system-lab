@@ -2,12 +2,14 @@
 
 ## Current Runtime Model
 
-All three projects call OpenAI models at runtime through `OpenAILlmClient`,
+All four projects call OpenAI models at runtime through `OpenAILlmClient`,
 which calls the Responses API and parses Pydantic structured outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
-- `POST /chat`: an orchestrator-led support flow
+- `POST /chat` in Project 2: an orchestrator-led support flow
 - `POST /evaluations/run`: an out-of-band adaptive evaluation flow
+- `POST /chat` in Project 4: a project copilot that routes across RAG,
+  read-only SQL, project API tools, context, and clarification
 
 Set `OPENAI_API_KEY` before running the API. The repo includes `.env.example`;
 copy it to `.env`, fill the key, and source it before starting FastAPI:
@@ -38,6 +40,8 @@ Use `docs/` for design and workflow notes. It keeps the repository readable:
 - `docs/tradeoffs.md`: cross-project architecture tradeoffs and non-goals.
 - `docs/latency_benchmark.md`: local benchmark strategy for comparing latency,
   caller concurrency, and architecture tradeoffs.
+- `docs/project4_rag_pipeline.md`: Project 4 upload, persistence, retrieval,
+  citation, document-library, and reindexing flow.
 - `project4_agentic_project_copilot/docs/architecture.md`: the retrieval,
   text-to-SQL, and project-tool copilot pattern.
 - `docs/example_conversations.md`: representative request/response traces.
@@ -107,6 +111,20 @@ The current Project 3 generated regressions replay two concrete Project 1
 failure classes: delivery-date return eligibility and refund ownership gating.
 New failure classes should add similarly concrete replay helpers rather than only
 checking that generated JSON exists.
+
+## Project 4 RAG Pipeline
+
+Project 4 is still an orchestrated copilot, not a pure RAG app. The RAG path is
+used for uploaded documents, while separate paths handle read-only SQL, project
+API tool calls, session context, and clarification.
+
+Uploaded documents are persisted in local SQLite as document metadata, extracted
+text chunks, and JSON embeddings. The original file bytes are not stored. The UI
+document library can list, select, and delete stored documents. Insert and delete
+operations trigger a full embedding reindex of remaining stored chunks, which is
+simple and inspectable for the MVP.
+
+For the detailed sequence, see `docs/project4_rag_pipeline.md`.
 
 ## LLM Integration
 
