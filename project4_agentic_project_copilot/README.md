@@ -13,6 +13,7 @@ orchestrator + RAG over files + safe text-to-SQL + confirmed API tool use
 
 - Upload markdown, text, reStructuredText, or PDF documents.
 - Extract text, chunk it, create embeddings, and store chunks in local SQLite.
+- View, select, and delete uploaded documents from the document library.
 - Retrieve relevant chunks for file questions and answer with citations.
 - Query a local SQLite task database through generated read-only SQL.
 - Block destructive SQL such as `DELETE`, `UPDATE`, `DROP`, `INSERT`, and `ALTER`.
@@ -61,6 +62,10 @@ retrieve from that document and return citations. If a model or API call fails,
 the backend returns a visible chat response and the UI shows request/upload
 errors instead of silently dropping the turn.
 
+Uploaded files persist in the local SQLite database until deleted through the
+document library or the database file is removed. Deleting a selected document
+clears it from the current session.
+
 ## Local Data
 
 Project 4 uses local SQLite for the MVP:
@@ -85,6 +90,9 @@ RAG shape.
 
 Uploads compute embeddings before opening the SQLite write transaction, so the
 database is not locked while waiting on external embedding calls.
+After a document insert or delete, the app reindexes stored document chunks by
+recomputing embeddings from the persisted chunk text. This keeps the local
+vector store consistent with the document library.
 
 ## Safety Model
 

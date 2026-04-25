@@ -7,7 +7,7 @@ from pathlib import Path
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
 from project4_agentic_project_copilot.app.embeddings import EmbeddingClient, OpenAIEmbeddingClient, cosine_similarity
-from project4_agentic_project_copilot.app.models import RetrievedChunk, UploadResponse
+from project4_agentic_project_copilot.app.models import DocumentSummary, RetrievedChunk, UploadResponse
 
 
 SUPPORTED_TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".rst"}
@@ -49,7 +49,86 @@ class DocumentStore:
                     (chunk_id, document_id, index, chunk, json.dumps(embedding)),
                 )
             conn.commit()
-        return UploadResponse(document_id=document_id, filename=filename, chunk_count=len(chunks))
+        reindexed_count = await self.reindex_embeddings()
+        return UploadResponse(
+            document_id=document_id,
+            filename=filename,
+            chunk_count=len(chunks),
+            reindexed_chunk_count=reindexed_count,
+        )
+
+    def list_documents(self) -> list[DocumentSummary]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT d.document_id, d.filename, d.content_type, d.created_at, COUNT(c.chunk_id) AS chunk_count
+                FROM documents d
+                LEFT JOIN document_chunks c ON c.document_id = d.document_id
+                GROUP BY d.document_id, d.filename, d.content_type, d.created_at
+                ORDER BY d.created_at DESC, d.filename
+                """
+            ).fetchall()
+        return [
+            DocumentSummary(
+                document_id=row["document_id"],
+                filename=row["filename"],
+                content_type=row["content_type"],
+                chunk_count=int(row["chunk_count"]),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def get_document(self, document_id: str) -> DocumentSummary | None:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT d.document_id, d.filename, d.content_type, d.created_at, COUNT(c.chunk_id) AS chunk_count
+                FROM documents d
+                LEFT JOIN document_chunks c ON c.document_id = d.document_id
+                WHERE d.document_id = ?
+                GROUP BY d.document_id, d.filename, d.content_type, d.created_at
+                """,
+                (document_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return DocumentSummary(
+            document_id=row["document_id"],
+            filename=row["filename"],
+            content_type=row["content_type"],
+            chunk_count=int(row["chunk_count"]),
+            created_at=row["created_at"],
+        )
+
+    async def delete_document(self, document_id: str) -> tuple[bool, int]:
+        with self.db.connect() as conn:
+            existing = conn.execute("SELECT 1 FROM documents WHERE document_id = ?", (document_id,)).fetchone()
+            if existing is None:
+                return False, 0
+            conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
+            conn.execute("DELETE FROM documents WHERE document_id = ?", (document_id,))
+            conn.commit()
+        reindexed_count = await self.reindex_embeddings()
+        return True, reindexed_count
+
+    async def reindex_embeddings(self) -> int:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT chunk_id, text
+                FROM document_chunks
+                ORDER BY document_id, chunk_index
+                """
+            ).fetchall()
+        updates = []
+        for row in rows:
+            updates.append((json.dumps(await self.embedding_client.embed(row["text"])), row["chunk_id"]))
+        if updates:
+            with self.db.connect() as conn:
+                conn.executemany("UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?", updates)
+                conn.commit()
+        return len(updates)
 
     async def search(self, query: str, *, top_k: int = 4, document_id: str | None = None) -> list[RetrievedChunk]:
         query_embedding = await self.embedding_client.embed(query)

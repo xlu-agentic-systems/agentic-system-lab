@@ -247,6 +247,57 @@ def test_file_upload_retrieval_answers_with_citations(tmp_path: Path) -> None:
     assert response.citations[0].filename == "launch_brief.md"
 
 
+def test_document_library_select_delete_and_reindex(tmp_path: Path) -> None:
+    embedding_client = CountingHashEmbeddingClient()
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=RuleBasedLlmClient(),
+        embedding_client=embedding_client,
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    first = run(
+        copilot.upload_file(
+            filename="first.md",
+            content_type="text/markdown",
+            content=b"# First\nThe first uploaded document discusses alpha.",
+            session_id="library",
+        )
+    )
+    second = run(
+        copilot.upload_file(
+            filename="second.md",
+            content_type="text/markdown",
+            content=b"# Second\nThe second uploaded document discusses beta.",
+            session_id="library",
+        )
+    )
+    documents = run(copilot.list_documents()).documents
+
+    assert first.reindexed_chunk_count == 1
+    assert second.reindexed_chunk_count == 2
+    assert embedding_client.calls == 5
+    assert {document.filename for document in documents} == {"first.md", "second.md"}
+
+    selected = run(copilot.select_document(session_id="library", document_id=first.document_id))
+    response = run(copilot.chat(ChatRequest(session_id="library", message="What does this file discuss?")))
+
+    assert selected.context.current_document_filename == "first.md"
+    assert response.route == "file_retrieval"
+    assert response.citations[0].document_id == first.document_id
+
+    deleted = run(copilot.delete_document(session_id="library", document_id=first.document_id))
+    remaining = run(copilot.list_documents()).documents
+
+    assert deleted.deleted is True
+    assert deleted.reindexed_chunk_count == 1
+    assert deleted.context is not None
+    assert deleted.context.current_document_id is None
+    assert embedding_client.calls == 7
+    assert [document.document_id for document in remaining] == [second.document_id]
+
+
 def test_sql_question_generates_valid_read_only_sql(tmp_path: Path) -> None:
     response = run(
         service(tmp_path).chat(
@@ -377,6 +428,16 @@ class FailingLlmClient:
 class SlowHashEmbeddingClient(HashEmbeddingClient):
     async def embed(self, text: str) -> list[float]:
         await asyncio.sleep(0.02)
+        return await super().embed(text)
+
+
+class CountingHashEmbeddingClient(HashEmbeddingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def embed(self, text: str) -> list[float]:
+        self.calls += 1
         return await super().embed(text)
 
 
