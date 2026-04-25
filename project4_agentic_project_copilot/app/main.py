@@ -24,7 +24,10 @@ def get_service() -> ProjectCopilotService:
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(PROJECT_ROOT / "ui" / "index.html")
+    return FileResponse(
+        PROJECT_ROOT / "ui" / "index.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/health")

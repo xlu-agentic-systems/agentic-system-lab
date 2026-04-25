@@ -51,6 +51,7 @@ class ProjectCopilotService:
         if session_id:
             context = await self.session_store.load(session_id)
             context.current_document_id = upload.document_id
+            context.current_document_filename = upload.filename
             append_turn(context, role="assistant", content=f"Uploaded {filename} and selected it as the current document.")
             await self.session_store.save(context)
             upload.context = context
@@ -143,6 +144,7 @@ class ProjectCopilotService:
         ]
         if chunks:
             context.current_document_id = chunks[0].document_id
+            context.current_document_filename = chunks[0].filename
         return self._response(
             request,
             context,
@@ -239,7 +241,7 @@ class ProjectCopilotService:
         response = (
             f"Current project: {context.current_project_id or 'none'}. "
             f"Current task: {context.current_task_id or 'none'}. "
-            f"Current document: {context.current_document_id or 'none'}."
+            f"Current document: {context.current_document_filename or context.current_document_id or 'none'}."
         )
         return self._response(
             request,

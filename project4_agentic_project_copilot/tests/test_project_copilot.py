@@ -100,6 +100,7 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
 
     assert upload.context is not None
     assert upload.context.current_document_id == upload.document_id
+    assert upload.context.current_document_filename == "current_file.md"
 
     response = run(
         copilot.chat(
@@ -112,6 +113,7 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
 
     assert response.route == "file_retrieval"
     assert response.context.current_document_id == upload.document_id
+    assert response.context.current_document_filename == "current_file.md"
     assert response.citations
     assert response.citations[0].document_id == upload.document_id
 
@@ -148,10 +150,46 @@ def test_upload_after_file_question_allows_how_about_now_followup(tmp_path: Path
     assert before_upload.route == "clarify"
     assert upload.context is not None
     assert upload.context.current_document_id == upload.document_id
+    assert upload.context.current_document_filename == "issue_12_brief.md"
     assert after_upload.route == "file_retrieval"
     assert after_upload.context.current_document_id == upload.document_id
+    assert after_upload.context.current_document_filename == "issue_12_brief.md"
     assert after_upload.citations
     assert after_upload.citations[0].document_id == upload.document_id
+
+
+def test_concurrent_uploads_keep_session_contexts_isolated(tmp_path: Path) -> None:
+    db = CopilotDatabase(tmp_path / "copilot.sqlite3")
+    copilot = ProjectCopilotService(
+        db=db,
+        llm_client=RuleBasedLlmClient(),
+        embedding_client=SlowHashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    async def upload_all():
+        return await asyncio.gather(
+            *[
+                copilot.upload_file(
+                    filename=f"concurrent_{index}.md",
+                    content_type="text/markdown",
+                    content=f"# Concurrent {index}\nUpload {index} should not lock the database.".encode(),
+                    session_id=f"session-{index}",
+                )
+                for index in range(6)
+            ]
+        )
+
+    uploads = run(upload_all())
+
+    assert len(uploads) == 6
+    for index, upload in enumerate(uploads):
+        assert upload.chunk_count == 1
+        assert upload.context is not None
+        assert upload.context.session_id == f"session-{index}"
+        assert upload.context.current_document_id == upload.document_id
+        assert upload.context.current_document_filename == f"concurrent_{index}.md"
 
 
 def test_file_retrieval_does_not_cross_session_boundaries(tmp_path: Path) -> None:
@@ -205,6 +243,7 @@ def test_file_upload_retrieval_answers_with_citations(tmp_path: Path) -> None:
     assert response.route == "file_retrieval"
     assert response.citations
     assert response.context.current_document_id == upload.document_id
+    assert response.context.current_document_filename == "launch_brief.md"
     assert response.citations[0].filename == "launch_brief.md"
 
 
@@ -333,6 +372,12 @@ def test_trace_log_records_orchestration_decision(tmp_path: Path) -> None:
 class FailingLlmClient:
     async def parse(self, *, task_name, system_prompt, user_payload, response_model):
         raise RuntimeError("model unavailable")
+
+
+class SlowHashEmbeddingClient(HashEmbeddingClient):
+    async def embed(self, text: str) -> list[float]:
+        await asyncio.sleep(0.02)
+        return await super().embed(text)
 
 
 def _contains_open_dict(value) -> bool:

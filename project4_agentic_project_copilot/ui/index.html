@@ -96,6 +96,13 @@
       font-size: 12px;
     }
     .small { color: var(--muted); font-size: 13px; }
+    .state-line {
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 8px 0 0;
+      overflow-wrap: anywhere;
+    }
     .citation {
       border-left: 3px solid var(--accent);
       padding-left: 8px;
@@ -124,10 +131,15 @@
         <input id="file" type="file" accept=".md,.markdown,.txt,.text,.rst,.pdf">
         <button id="upload" type="button">Upload</button>
         <p id="upload-status" class="small"></p>
+        <p id="selected-document" class="state-line">No file selected.</p>
       </section>
       <section>
         <h2>Context</h2>
-        <pre id="context">{}</pre>
+        <pre id="context">{
+  "current_project_id": null,
+  "current_task_id": null,
+  "current_document": null
+}</pre>
       </section>
       <section>
         <h2>SQL</h2>
@@ -160,6 +172,8 @@
     const toolResult = document.getElementById("tool-result");
     const citations = document.getElementById("citations");
     const confirmButton = document.getElementById("confirm");
+    const uploadButton = document.getElementById("upload");
+    const selectedDocument = document.getElementById("selected-document");
 
     function addMessage(role, text) {
       const item = document.createElement("div");
@@ -175,6 +189,22 @@
       } catch (error) {
         return {};
       }
+    }
+
+    function renderContext(rawContext = {}) {
+      const currentDocumentId = rawContext.current_document_id || null;
+      const currentDocumentFilename = rawContext.current_document_filename || null;
+      selectedDocument.textContent = currentDocumentFilename
+        ? `Current file: ${currentDocumentFilename}`
+        : currentDocumentId ? "Current file selected." : "No file selected.";
+      context.textContent = JSON.stringify({
+        current_project_id: rawContext.current_project_id || null,
+        current_task_id: rawContext.current_task_id || null,
+        current_document: currentDocumentId ? {
+          id: currentDocumentId,
+          filename: currentDocumentFilename
+        } : null
+      }, null, 2);
     }
 
     async function readError(response) {
@@ -200,11 +230,7 @@
         }
         const data = await response.json();
         addMessage("assistant", data.response);
-        context.textContent = JSON.stringify({
-          current_project_id: data.context.current_project_id,
-          current_task_id: data.context.current_task_id,
-          current_document_id: data.context.current_document_id
-        }, null, 2);
+        renderContext(data.context);
         sql.textContent = data.generated_sql || "No SQL for this turn.";
         tool.textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn.";
         toolResult.textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn.";
@@ -246,12 +272,14 @@
       await send("Confirm action", pendingActionId);
     });
 
-    document.getElementById("upload").addEventListener("click", async () => {
+    uploadButton.addEventListener("click", async () => {
       const file = document.getElementById("file").files[0];
       if (!file) return;
       const formData = new FormData();
       formData.append("file", file);
       formData.append("session_id", sessionId);
+      uploadButton.disabled = true;
+      uploadButton.textContent = "Uploading...";
       try {
         const response = await fetch("/upload", { method: "POST", body: formData });
         if (!response.ok) {
@@ -262,16 +290,17 @@
         const uploadContext = data.context || {
           current_project_id: existingContext.current_project_id || null,
           current_task_id: existingContext.current_task_id || null,
-          current_document_id: data.document_id
+          current_document_id: data.document_id,
+          current_document_filename: data.filename
         };
         document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
-        context.textContent = JSON.stringify({
-          current_project_id: uploadContext.current_project_id || null,
-          current_task_id: uploadContext.current_task_id || null,
-          current_document_id: uploadContext.current_document_id || data.document_id
-        }, null, 2);
+        renderContext(uploadContext);
+        addMessage("assistant", `Uploaded ${data.filename} (${data.chunk_count} chunks). It is now the current file.`);
       } catch (error) {
         document.getElementById("upload-status").textContent = `Upload failed: ${error.message}`;
+      } finally {
+        uploadButton.disabled = false;
+        uploadButton.textContent = "Upload";
       }
     });
 

@@ -47,6 +47,7 @@ class SessionContext(BaseModel):
     current_project_id: int | None = None
     current_task_id: int | None = None
     current_document_id: str | None = None
+    current_document_filename: str | None = None
     pending_actions: dict[str, "ToolCall"] = Field(default_factory=dict)
     history: list["ChatTurn"] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

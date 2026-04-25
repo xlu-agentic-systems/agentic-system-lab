@@ -31,14 +31,16 @@ class DocumentStore:
         text = extract_text(filename, content)
         document_id = str(uuid.uuid4())
         chunks = chunk_text(text, chunk_size=self.chunk_size, overlap=self.chunk_overlap)
+        embeddings = []
+        for chunk in chunks:
+            embeddings.append(await self.embedding_client.embed(chunk))
         with self.db.connect() as conn:
             conn.execute(
                 "INSERT INTO documents(document_id, filename, content_type) VALUES (?, ?, ?)",
                 (document_id, filename, content_type or "application/octet-stream"),
             )
-            for index, chunk in enumerate(chunks):
+            for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 chunk_id = f"{document_id}:{index}"
-                embedding = await self.embedding_client.embed(chunk)
                 conn.execute(
                     """
                     INSERT INTO document_chunks(chunk_id, document_id, chunk_index, text, embedding_json)
