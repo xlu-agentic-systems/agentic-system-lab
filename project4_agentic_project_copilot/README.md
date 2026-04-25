@@ -54,11 +54,12 @@ OPENAI_TIMEOUT_SECONDS=30
 
 The browser UI sends the active `session_id` with file uploads, and the upload
 response includes the updated session context. The uploaded document becomes the
-session's current document. Follow-ups such as "what is this file doing?" or
-"how about now" after an upload retrieve from that document and return
-citations. If a model or API call fails, the backend returns a visible chat
-response and the UI shows request/upload errors instead of silently dropping the
-turn.
+session's current document, including the uploaded filename. The UI shows the
+current file in Runtime State and adds a chat-visible upload confirmation.
+Follow-ups such as "what is this file doing?" or "how about now" after an upload
+retrieve from that document and return citations. If a model or API call fails,
+the backend returns a visible chat response and the UI shows request/upload
+errors instead of silently dropping the turn.
 
 ## Local Data
 
@@ -81,6 +82,9 @@ The task schema includes:
 The vector store is implemented as SQLite `document_chunks` rows with JSON
 embeddings. This keeps the MVP local and inspectable while preserving the core
 RAG shape.
+
+Uploads compute embeddings before opening the SQLite write transaction, so the
+database is not locked while waiting on external embedding calls.
 
 ## Safety Model
 

@@ -21,7 +21,9 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     client = TestClient(main.app)
 
     assert client.get("/health").json() == {"status": "ok"}
-    assert client.get("/").status_code == 200
+    index = client.get("/")
+    assert index.status_code == 200
+    assert index.headers["cache-control"] == "no-store, max-age=0"
 
     upload = client.post(
         "/upload",
@@ -32,6 +34,7 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     upload_body = upload.json()
     assert upload_body["chunk_count"] == 1
     assert upload_body["context"]["current_document_id"] == upload_body["document_id"]
+    assert upload_body["context"]["current_document_filename"] == "brief.md"
 
     chat = client.post(
         "/chat",
@@ -41,3 +44,4 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     body = chat.json()
     assert body["route"] == "file_retrieval"
     assert body["citations"]
+    assert body["context"]["current_document_filename"] == "brief.md"
