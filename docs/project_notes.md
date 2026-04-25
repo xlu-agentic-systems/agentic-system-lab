@@ -2,8 +2,8 @@
 
 ## Current Runtime Model
 
-Projects 1 and 2 call OpenAI models at runtime through `OpenAILlmClient`, which
-calls the Responses API and parses Pydantic structured outputs:
+All three projects call OpenAI models at runtime through `OpenAILlmClient`,
+which calls the Responses API and parses Pydantic structured outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
 - `POST /chat`: an orchestrator-led support flow
@@ -35,6 +35,7 @@ Use `docs/` for design and workflow notes. It keeps the repository readable:
 
 - `README.md`: quick start, purpose, and high-level explanation.
 - `docs/architecture.md`: system design, sequence diagram, safety boundaries.
+- `docs/tradeoffs.md`: cross-project architecture tradeoffs and non-goals.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/project_notes.md`: implementation rationale and agentic coding workflow.
 
@@ -77,12 +78,21 @@ The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
 each other, execute irreversible tools, or own session state.
 
+Project 2 specialists receive backend facts before model calls. The model
+summarizes and proposes actions, but the backend still decides execution order,
+escalation insertion, safe action execution, and final aggregation.
+
 ## Adaptive Evaluation
 
 Project 3 treats improvement as a harness around production systems, not as
 self-modifying production behavior. Completed traces are reviewed after the fact,
 failures become regression tests, and prompt changes remain proposed until a
 human approves them.
+
+The current Project 3 generated regressions replay two concrete Project 1
+failure classes: delivery-date return eligibility and refund ownership gating.
+New failure classes should add similarly concrete replay helpers rather than only
+checking that generated JSON exists.
 
 ## LLM Integration
 
@@ -91,7 +101,8 @@ The LLM receives:
 - Input: `message`, `user_id`, loaded session context, and relevant backend/tool facts.
 - Output: validated Pydantic objects such as `OrchestratorDecision`,
   `RoutingOutput`, `PlannerOutput`, Project 2 LLM-facing `AgentOutput`, backend
-  `AgentResult`, and `QAOutput`.
+  `AgentResult`, `QAOutput`, `EvaluationResult`, `GeneratedTestCase`, and
+  `PromptPatch`.
 - Execution: backend invokes tools after policy validation.
 
 The LLM should help classify, summarize, and reason over ambiguous customer
