@@ -29,8 +29,9 @@ class HashEmbeddingClient:
 
 
 class OpenAIEmbeddingClient:
-    def __init__(self, *, model: str | None = None) -> None:
+    def __init__(self, *, model: str | None = None, timeout_seconds: float | None = None) -> None:
         self.model = model or os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
         self._client = None
 
     async def embed(self, text: str) -> list[float]:
@@ -47,7 +48,7 @@ class OpenAIEmbeddingClient:
                     "The openai package is required for embedding calls. Install dependencies with "
                     '`pip install -e ".[dev]"`.'
                 ) from exc
-            self._client = AsyncOpenAI()
+            self._client = AsyncOpenAI(timeout=self.timeout_seconds)
         return self._client
 
 

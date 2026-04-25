@@ -43,6 +43,12 @@ Project 4 keeps everything local for the MVP:
 - JSON session file for current context and pending confirmations.
 - JSONL trace file for orchestration decisions.
 
+File uploads are tied to the active chat session. The upload endpoint stores the
+chunks in SQLite and records the uploaded `document_id` as
+`SessionContext.current_document_id`, which lets follow-up requests such as
+"what is this file doing?" resolve to the current document instead of relying on
+global document search.
+
 In production, the same logical split would map to:
 
 - Postgres or another transactional DB for tasks and comments.
@@ -63,6 +69,12 @@ The API tool path requires confirmation for every state-changing action:
 - `add_comment`
 
 Only `search_tasks` is read-only and can execute immediately.
+
+The live OpenAI structured-output schemas avoid unbounded object fields for
+agent-produced tool arguments. This keeps function-like tool proposals explicit:
+the model can fill known fields such as `project_id`, `task_id`, `status`,
+`title`, `body`, or `query`, and backend validators still make the final
+execution decision.
 
 ## Pattern
 

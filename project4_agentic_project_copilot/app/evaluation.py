@@ -7,7 +7,6 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
-from project4_agentic_project_copilot.app.document_store import DocumentStore
 from project4_agentic_project_copilot.app.embeddings import HashEmbeddingClient
 from project4_agentic_project_copilot.app.llm import RuleBasedLlmClient
 from project4_agentic_project_copilot.app.models import ChatRequest, EvaluationCase, EvaluationResult
@@ -38,20 +37,23 @@ async def run_evaluation(cases_path: Path | str = EVAL_CASES_PATH) -> Evaluation
         session_store=JsonSessionStore(root / "sessions.json"),
         trace_store=JsonlTraceStore(root / "traces.jsonl"),
     )
-    await service.upload_file(
-        filename="launch_brief.md",
-        content_type="text/markdown",
-        content=b"# Launch Brief\nThe Apollo Launch project requires a rollout checklist, API contract review, and clear owners.",
-    )
     cases = load_cases(cases_path)
     results = []
     for case in cases:
-        response = await service.chat(ChatRequest(session_id=f"eval-{case.case_id}", message=case.user_query))
+        session_id = f"eval-{case.case_id}"
+        if case.expected_tool_choice == "file_retrieval":
+            await service.upload_file(
+                filename="launch_brief.md",
+                content_type="text/markdown",
+                content=b"# Launch Brief\nThe Apollo Launch project requires a rollout checklist, API contract review, and clear owners.",
+                session_id=session_id,
+            )
+        response = await service.chat(ChatRequest(session_id=session_id, message=case.user_query))
         passed = _case_passed(case, response)
         if passed and case.confirm_action and response.pending_action:
             confirmed = await service.chat(
                 ChatRequest(
-                    session_id=f"eval-{case.case_id}",
+                    session_id=session_id,
                     message="Confirm action",
                     confirm_action_id=response.pending_action.action_id,
                 )
