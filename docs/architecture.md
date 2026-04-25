@@ -3,12 +3,14 @@
 ## Core Flow
 
 The orchestrator is implemented in `app/service.py`. It loads session state,
-routes the message, builds an execution plan, runs specialist agents, optionally
-adds escalation, validates backend actions, aggregates the final answer, and
-saves session state.
+routes the message with deterministic keyword rules, builds an execution plan,
+runs specialist agents, optionally adds escalation, validates backend actions,
+aggregates the final answer, and saves session state.
 
 Domain agents are stateless. They receive `message`, `user_id`, and the loaded
-session context, then return a Pydantic `AgentResult`.
+session context, then return a Pydantic `AgentResult`. In PR #1 the agents are
+deterministic Python classes; the architecture boundary is intentionally shaped
+so an LLM adapter can later return the same structured models.
 
 ## Sequence Diagram
 

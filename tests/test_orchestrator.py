@@ -28,8 +28,28 @@ def test_parallel_payment_and_return_routing(tmp_path: Path) -> None:
     assert response.selected_agents == ["return_agent", "payment_agent"]
     assert response.execution_plan.mode == "parallel"
     assert {result.agent for result in response.agent_results} == {"return_agent", "payment_agent"}
+    return_result = next(result for result in response.agent_results if result.agent == "return_agent")
+    assert return_result.proposed_actions[0].name == "start_return_authorization"
+    assert return_result.proposed_actions[0].requires_approval is True
     assert "eligible for return" in response.final_response
     assert "duplicate charge" in response.final_response
+
+
+def test_independent_return_and_no_duplicate_charge_does_not_escalate(tmp_path: Path) -> None:
+    response = run(
+        service(tmp_path).handle_message(
+            ConversationRequest(
+                session_id="parallel-no-conflict",
+                user_id="user-1",
+                message="I was charged once and I want to return item-1 from order-1001.",
+            )
+        )
+    )
+
+    assert response.selected_agents == ["return_agent", "payment_agent"]
+    assert response.execution_plan.mode == "parallel"
+    assert {result.agent for result in response.agent_results} == {"return_agent", "payment_agent"}
+    assert "support ticket" not in response.final_response
 
 
 def test_single_shipping_agent_routing(tmp_path: Path) -> None:

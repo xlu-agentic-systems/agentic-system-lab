@@ -12,6 +12,7 @@ from app.models import (
     ConversationResponse,
     ExecutionPlan,
     ExecutionStep,
+    ProposedAction,
     ReturnContext,
     TraceEvent,
 )
@@ -53,12 +54,25 @@ class ReturnAgent:
         eligibility = await self.tools.check_return_eligibility(order["order_id"], item["item_id"])
         if eligibility["eligible"]:
             amount = eligibility["amount"]
+
             return AgentResult(
                 agent=self.name,
                 confidence=0.92,
                 summary=f"{product['name']} is eligible for return. The refundable amount is ${amount}.",
                 details={"resolved": resolved, "eligibility": eligibility},
-                proposed_actions=[],
+                proposed_actions=[
+                    ProposedAction(
+                        name="start_return_authorization",
+                        args={
+                            "order_id": order["order_id"],
+                            "item_id": item["item_id"],
+                            "amount": amount,
+                        },
+                        safety="safe_write",
+                        requires_approval=True,
+                        reason="Create a return authorization only after customer confirmation.",
+                    )
+                ],
                 reason_codes=["return_eligible"],
             )
         return AgentResult(
@@ -459,7 +473,14 @@ def _requires_sequential(message: str, selected_agents: list[AgentName]) -> bool
 
 def _has_disagreement(results: list[AgentResult]) -> bool:
     codes = {code for result in results for code in result.reason_codes}
-    return "return_eligible" in codes and "duplicate_charge_not_found" in codes
+    contradictory_pairs = {
+        ("return_eligible", "return_window_expired"),
+        ("return_eligible", "item_not_refundable"),
+        ("return_eligible", "policy_disallows_refund"),
+        ("duplicate_charge_found", "duplicate_charge_not_found"),
+        ("account_loaded", "account_not_found"),
+    }
+    return any(left in codes and right in codes for left, right in contradictory_pairs)
 
 
 def _aggregate_response(results: list[AgentResult]) -> str:
