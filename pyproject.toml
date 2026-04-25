@@ -7,6 +7,9 @@ dependencies = [
   "fastapi>=0.110",
   "openai>=1.99.0",
   "pydantic>=2.6",
+  "pypdf>=4.0",
+  "python-multipart>=0.0.9",
+  "starlette<1.0",
   "uvicorn[standard]>=0.27",
 ]
 
@@ -24,5 +27,6 @@ testpaths = [
   "project2_agent_orchestrator/tests",
   "project3_adaptive_eval_system/tests",
   "project3_adaptive_eval_system/generated_tests",
+  "project4_agentic_project_copilot/tests",
 ]
 pythonpath = ["."]

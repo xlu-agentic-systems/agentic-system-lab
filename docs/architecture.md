@@ -6,6 +6,7 @@ runtime conventions but intentionally demonstrate different architecture shapes:
 1. **Project 1:** fixed multi-agent return pipeline
 2. **Project 2:** orchestrator-led support routing
 3. **Project 3:** out-of-band adaptive evaluation harness
+4. **Project 4:** retrieval and tool-use project copilot
 
 The implementations are deliberately small and interview-focused. The agents are
 logical roles invoked per request, not long-running processes. Backend code owns
@@ -400,14 +401,14 @@ evaluation run.
 
 ## Comparison
 
-| Dimension | Project 1 | Project 2 | Project 3 |
-|---|---|---|---|
-| Runtime shape | Fixed pipeline | Dynamic orchestration | Out-of-band evaluation |
-| Primary decision maker | Backend pipeline + role agents | Orchestrator + backend planner | Evaluation harness |
-| Main LLM output types | `RoutingOutput`, `PlannerOutput`, `QAOutput` | `OrchestratorDecision`, `AgentOutput` | `EvaluationResult`, `GeneratedTestCase`, `PromptPatch` |
-| Side effects | Refunds after validation | Support tickets only when safe | File artifacts and patch review status |
-| Best fit | Narrow workflow | Multi-domain support | Continuous improvement loop |
-| Main risk | Rigid branching | Routing/aggregation complexity | Weak traces or weak generated tests |
+| Dimension | Project 1 | Project 2 | Project 3 | Project 4 |
+|---|---|---|---|---|
+| Runtime shape | Fixed pipeline | Dynamic orchestration | Out-of-band evaluation | Orchestrated RAG + SQL + tools |
+| Primary decision maker | Backend pipeline + role agents | Orchestrator + backend planner | Evaluation harness | Copilot orchestrator |
+| Main LLM output types | `RoutingOutput`, `PlannerOutput`, `QAOutput` | `OrchestratorDecision`, `AgentOutput` | `EvaluationResult`, `GeneratedTestCase`, `PromptPatch` | `OrchestratorDecision`, `SqlPlan`, `ToolCall`, `FileAnswer` |
+| Side effects | Refunds after validation | Support tickets only when safe | File artifacts and patch review status | Confirmed task API writes |
+| Best fit | Narrow workflow | Multi-domain support | Continuous improvement loop | Knowledge/data/tool copilot |
+| Main risk | Rigid branching | Routing/aggregation complexity | Weak traces or weak generated tests | Retrieval quality, SQL safety, write confirmation UX |
 
 ## Design Rules Used Across Projects
 
@@ -419,3 +420,21 @@ evaluation run.
 6. Normalize model output when safety or consistency requires it.
 7. Keep tests deterministic by injecting rule-based LLM clients.
 8. Exercise real LLM calls separately with `.env` sourced.
+
+## Project 4: Agentic Project Copilot
+
+Project 4 adds a second use case to the repo. It is a retrieval and tool-use
+copilot rather than another e-commerce support bot.
+
+The main pattern is:
+
+```text
+Copilot Orchestrator -> files/RAG | SQL/data | API tool | context | clarification
+```
+
+RAG is one capability path, not the whole system. The copilot also inspects a
+local SQLite schema, generates read-only SQL, validates it before execution, and
+requires confirmation before state-changing project API tools run.
+
+See `project4_agentic_project_copilot/docs/architecture.md` for the detailed
+architecture.

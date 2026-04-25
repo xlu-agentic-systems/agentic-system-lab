@@ -126,3 +126,18 @@ The repo intentionally does not include:
 
 Those omissions keep the prototypes focused on architecture patterns rather than
 full product infrastructure.
+
+## Retrieval And Tool-Use Copilot
+
+Project 4 adds a different pattern from Projects 1-3. It combines an
+orchestrator with capability paths:
+
+- RAG over uploaded files
+- safe text-to-SQL over local structured data
+- confirmed API tool invocation for project actions
+- session context for current project/task/document
+
+The tradeoff is a broader safety surface. Retrieval needs citations and source
+grounding; SQL needs read-only validation; API actions need confirmation before
+writes. This is more complex than a pure RAG app, but it better matches a real
+project copilot that must work across files, data, and actions.
