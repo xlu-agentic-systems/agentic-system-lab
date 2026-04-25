@@ -52,11 +52,13 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_TIMEOUT_SECONDS=30
 ```
 
-The browser UI sends the active `session_id` with file uploads, so the uploaded
-document becomes the session's current document. A follow-up such as "what is
-this file doing?" retrieves from that document and returns citations. If a model
-or API call fails, the backend returns a visible chat response and the UI shows
-request/upload errors instead of silently dropping the turn.
+The browser UI sends the active `session_id` with file uploads, and the upload
+response includes the updated session context. The uploaded document becomes the
+session's current document. Follow-ups such as "what is this file doing?" or
+"how about now" after an upload retrieve from that document and return
+citations. If a model or API call fails, the backend returns a visible chat
+response and the UI shows request/upload errors instead of silently dropping the
+turn.
 
 ## Local Data
 

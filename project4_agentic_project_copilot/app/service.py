@@ -51,7 +51,9 @@ class ProjectCopilotService:
         if session_id:
             context = await self.session_store.load(session_id)
             context.current_document_id = upload.document_id
+            append_turn(context, role="assistant", content=f"Uploaded {filename} and selected it as the current document.")
             await self.session_store.save(context)
+            upload.context = context
         return upload
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
@@ -65,7 +67,8 @@ class ProjectCopilotService:
         response = self._preflight_response(request, context)
         if response is None:
             try:
-                if _asks_about_files(request.message.strip().lower()) and context.current_document_id:
+                text = request.message.strip().lower()
+                if _should_answer_current_document(text, context):
                     response = await self._answer_from_files(
                         request,
                         context,
@@ -334,3 +337,42 @@ def _is_greeting(text: str) -> bool:
 
 def _asks_about_files(text: str) -> bool:
     return any(term in text for term in ("this file", "file", "document", "doc", "pdf", "markdown"))
+
+
+def _should_answer_current_document(text: str, context: SessionContext) -> bool:
+    if not context.current_document_id:
+        return False
+    if _asks_about_files(text):
+        return True
+    return _is_document_followup(text) and _recent_file_context(context)
+
+
+def _is_document_followup(text: str) -> bool:
+    normalized = text.strip(" ?!.").lower()
+    if normalized in {
+        "how about now",
+        "what about now",
+        "try now",
+        "now",
+        "ok now",
+        "can you answer now",
+        "can you do it now",
+    }:
+        return True
+    return any(
+        phrase in normalized
+        for phrase in (
+            "what does it say",
+            "what is it doing",
+            "tell me about it",
+            "say something about it",
+            "summarize it",
+            "explain it",
+            "describe it",
+        )
+    )
+
+
+def _recent_file_context(context: SessionContext) -> bool:
+    recent_text = " ".join(turn.content.lower() for turn in context.history[-6:])
+    return any(term in recent_text for term in ("file", "document", "pdf", "markdown", "uploaded", "upload"))

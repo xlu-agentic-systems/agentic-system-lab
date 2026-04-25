@@ -47,7 +47,10 @@ File uploads are tied to the active chat session. The upload endpoint stores the
 chunks in SQLite and records the uploaded `document_id` as
 `SessionContext.current_document_id`, which lets follow-up requests such as
 "what is this file doing?" resolve to the current document instead of relying on
-global document search.
+global document search. The upload response also returns the updated session
+context so the UI can display the selected document immediately. If the previous
+turn asked for a file before upload, short follow-ups such as "how about now"
+are treated as references to the newly selected document.
 
 In production, the same logical split would map to:
 
