@@ -36,7 +36,7 @@ set +a
 flowchart LR
     User["User or evaluator"]
     API["FastAPI or CLI entry point"]
-    Store["JSON / JSONL storage"]
+    Store["JSON active sessions\nJSONL durable traces"]
     Backend["Backend orchestration and validation"]
     LLM["OpenAI Responses API\nPydantic structured outputs"]
     Artifacts["Response or evaluation artifacts"]
@@ -69,7 +69,7 @@ planning, tool proposals, backend validation, and final customer messaging.
 ```mermaid
 flowchart TD
     Request["POST /returns/chat\nReturnConversationRequest"]
-    Load["JsonSessionStore.load\nsession_id + user_id"]
+    Load["JsonSessionStore.load\nuser_id + session_id + TTL"]
     Routing["RoutingAgent\nLLM -> RoutingOutput"]
     RoutingNorm["Backend routing normalization\nmerge context + compute missing fields"]
     Clarify{"Missing required\nreturn fields?"}
@@ -81,7 +81,8 @@ flowchart TD
     PlannerNorm["Backend planner normalization\nadd read tools + strip unsafe refund proposals"]
     Tools["validate_and_execute_tool\nbackend validation before side effects"]
     QA["QAAgent\nLLM -> final customer response"]
-    Save["JsonSessionStore.save"]
+    Save["JsonSessionStore.save\nactive session state"]
+    Trace["JsonlTraceStore.append\ndurable per-turn trace"]
     Response["ReturnConversationResponse"]
 
     Request --> Load --> Routing --> RoutingNorm --> Clarify
@@ -89,7 +90,7 @@ flowchart TD
     Clarify -- no --> IntentGate
     IntentGate -- no --> DeterministicPlan --> Tools
     IntentGate -- yes --> Facts --> Planner --> PlannerNorm
-    PlannerNorm --> Tools --> QA --> Save --> Response
+    PlannerNorm --> Tools --> QA --> Save --> Trace --> Response
 ```
 
 The fixed pipeline always uses the same high-level stages. Clarification cases
@@ -97,6 +98,12 @@ skip the planner LLM call and tool execution because `PlannerAgent` returns a
 deterministic `needs_clarification` result with no proposed tool calls.
 Policy questions and unsupported intents can also produce deterministic planner
 results before the planner LLM path.
+
+Project 1 keeps active session state and durable traces separate. The prototype
+uses JSON for active sessions with TTL metadata and JSONL for append-only
+conversation traces. In production, the active store maps to Redis or another
+low-latency session cache, while the trace store maps to a durable database or
+analytics sink.
 
 ### Agent Roles
 

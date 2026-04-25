@@ -80,6 +80,16 @@ The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
 each other, execute irreversible tools, or own session state.
 
+## Project 1 Session Storage
+
+Project 1 separates short-lived active session state from durable trace records.
+The local prototype uses `JsonSessionStore` with TTL metadata for active
+sessions and `JsonlTraceStore` for per-turn audit traces. In production, the
+same shape should map to Redis or another low-latency key-value store for active
+sessions, plus Postgres, DynamoDB, MongoDB, or a data lake table for durable
+conversation traces. A vector database should not be the source of truth for
+active session lifecycle.
+
 Project 2 specialists receive backend facts before model calls. The model
 summarizes and proposes actions, but the backend still decides execution order,
 escalation insertion, safe action execution, and final aggregation.

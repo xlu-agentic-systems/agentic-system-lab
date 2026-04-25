@@ -19,6 +19,7 @@ ToolSafety = Literal["read_only", "safe_write", "unsafe_write"]
 ActionStatus = Literal["proposed", "executed", "blocked"]
 Intent = Literal["return_request", "return_policy_question", "refund_status", "unknown"]
 DecisionStatus = Literal["needs_clarification", "approved", "rejected", "escalated"]
+SessionStatus = Literal["active", "expired"]
 
 
 class ChatMessage(BaseModel):
@@ -42,6 +43,10 @@ class SessionState(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
     last_status: DecisionStatus | None = None
     last_selected_agents: list[AgentName] = Field(default_factory=list)
+    status: SessionStatus = "active"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime | None = None
 
 
 class ConversationRequest(BaseModel):

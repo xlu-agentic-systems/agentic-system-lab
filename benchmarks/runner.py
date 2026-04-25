@@ -14,6 +14,7 @@ from project1_multi_agent_return_bot.app.llm import RuleBasedLlmClient as Projec
 from project1_multi_agent_return_bot.app.return_models import ReturnConversationRequest
 from project1_multi_agent_return_bot.app.return_service import ReturnConversationService
 from project1_multi_agent_return_bot.app.session_store import JsonSessionStore as Project1SessionStore
+from project1_multi_agent_return_bot.app.trace_store import JsonlTraceStore as Project1TraceStore
 from project2_agent_orchestrator.app.llm import RuleBasedLlmClient as Project2RuleLlm
 from project2_agent_orchestrator.app.models import ConversationRequest
 from project2_agent_orchestrator.app.service import ConversationService
@@ -208,6 +209,7 @@ def _project1_workload(root: Path, request_count: int, delay: float) -> Workload
     async def call(index: int) -> Any:
         service = ReturnConversationService(
             session_store=Project1SessionStore(root / f"project1-session-{index}.json"),
+            trace_store=Project1TraceStore(root / f"project1-traces-{index}.jsonl"),
             llm_client=llm,
         )
         message = _return_messages()[index % len(_return_messages())]
