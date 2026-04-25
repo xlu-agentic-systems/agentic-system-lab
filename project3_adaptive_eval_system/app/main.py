@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI, HTTPException
 
+from agentic_system_lab.observability import configure_observability_logging
 from project3_adaptive_eval_system.app.models import (
     EvaluationRunRequest,
     EvaluationRunResult,
@@ -13,10 +12,7 @@ from project3_adaptive_eval_system.app.models import (
 from project3_adaptive_eval_system.app.service import EvaluationService
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+configure_observability_logging(project="project3")
 
 app = FastAPI(title="Adaptive Evaluation System")
 service = EvaluationService()

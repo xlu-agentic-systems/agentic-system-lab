@@ -1,6 +1,6 @@
 # Agentic System Architecture
 
-This repo contains three small agentic-system prototypes. They share the same
+This repo contains four small agentic-system prototypes. They share the same
 runtime conventions but intentionally demonstrate different architecture shapes:
 
 1. **Project 1:** fixed multi-agent return pipeline
@@ -14,7 +14,7 @@ state, tool execution, validation, persistence, and side effects.
 
 ## Shared Runtime Pattern
 
-All three projects use these common boundaries:
+All four projects use these common boundaries:
 
 - **LLM boundary:** `OpenAILlmClient` calls the OpenAI Responses API with
   Pydantic structured outputs. Unit tests inject `RuleBasedLlmClient`.
@@ -24,6 +24,10 @@ All three projects use these common boundaries:
   only allowed side effects.
 - **Safety boundary:** model output is treated as advisory until normalized or
   checked by deterministic code.
+- **Observability boundary:** projects emit compact structured agent events to
+  local JSON logs and can optionally push those events to Loki for Grafana
+  inspection. Agent-facing observability access goes through a constrained
+  read-only query tool, not arbitrary shell or Grafana admin APIs.
 
 The `.env` file is not auto-loaded. For local real-LLM runs:
 
@@ -41,6 +45,7 @@ flowchart LR
     Backend["Backend orchestration and validation"]
     LLM["OpenAI Responses API\nPydantic structured outputs"]
     Artifacts["Response or evaluation artifacts"]
+    Logs["Structured JSON logs\noptional Loki/Grafana"]
 
     User --> API
     API --> Store
@@ -49,6 +54,7 @@ flowchart LR
     LLM --> Backend
     Backend --> Store
     Backend --> Artifacts
+    Backend --> Logs
 ```
 
 ## Project 1: Multi-Agent Return Bot

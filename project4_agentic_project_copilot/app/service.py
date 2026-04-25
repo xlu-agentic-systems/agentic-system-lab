@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from pathlib import Path
 
+from agentic_system_lab.observability import log_agent_event
 from project4_agentic_project_copilot.app.agents import CopilotOrchestrator, FileQaAgent, SqlAgent, ToolAgent
 from project4_agentic_project_copilot.app.database import CopilotDatabase
 from project4_agentic_project_copilot.app.document_store import DocumentStore
@@ -28,6 +30,9 @@ from project4_agentic_project_copilot.app.tools import ProjectToolService, WRITE
 from project4_agentic_project_copilot.app.trace_store import JsonlTraceStore
 
 
+logger = logging.getLogger(__name__)
+
+
 class ProjectCopilotService:
     def __init__(
         self,
@@ -51,6 +56,19 @@ class ProjectCopilotService:
 
     async def upload_file(self, *, filename: str, content_type: str, content: bytes, session_id: str | None = None):
         upload = await self.document_store.ingest_bytes(filename=filename, content_type=content_type, content=content)
+        log_agent_event(
+            logger,
+            event="document_ingested",
+            message="project4 document ingested",
+            session_id=session_id,
+            status="uploaded",
+            attributes={
+                "filename": filename,
+                "content_type": content_type,
+                "chunk_count": upload.chunk_count,
+                "reindexed_chunk_count": upload.reindexed_chunk_count,
+            },
+        )
         if session_id:
             context = await self.session_store.load(session_id)
             context.current_document_id = upload.document_id
@@ -76,6 +94,14 @@ class ProjectCopilotService:
 
     async def delete_document(self, *, session_id: str | None, document_id: str) -> DeleteDocumentResponse:
         deleted, reindexed_count = await self.document_store.delete_document(document_id)
+        log_agent_event(
+            logger,
+            event="document_deleted",
+            message="project4 document deleted",
+            session_id=session_id,
+            status="deleted" if deleted else "not_found",
+            attributes={"document_id": document_id, "reindexed_chunk_count": reindexed_count},
+        )
         context = None
         if session_id:
             context = await self.session_store.load(session_id)
@@ -94,9 +120,17 @@ class ProjectCopilotService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         context = await self.session_store.load(request.session_id)
         append_turn(context, role="user", content=request.message)
+        log_agent_event(
+            logger,
+            event="user_message",
+            message="project4 user message received",
+            session_id=request.session_id,
+            attributes={"message_length": len(request.message), "confirm_action": bool(request.confirm_action_id)},
+        )
         if request.confirm_action_id:
             response = await self._confirm_action(request, context)
             await self._persist(request.message, response)
+            self._log_response(request, response)
             return response
 
         response = self._preflight_response(request, context)
@@ -112,6 +146,20 @@ class ProjectCopilotService:
                     )
                 else:
                     decision = await self.orchestrator.decide(request.message, context)
+                    log_agent_event(
+                        logger,
+                        event="agent_decision",
+                        message="project4 copilot orchestrator decision",
+                        agent="copilot_orchestrator",
+                        session_id=request.session_id,
+                        route=decision.route,
+                        status=decision.route,
+                        attributes={
+                            "reason_length": len(decision.reasoning),
+                            "tool_name": decision.tool_name,
+                            "has_search_query": bool(decision.search_query),
+                        },
+                    )
                     if decision.route == "file_retrieval":
                         response = await self._answer_from_files(request, context, decision.reasoning, decision.search_query or request.message)
                     elif decision.route == "sql_query":
@@ -126,7 +174,24 @@ class ProjectCopilotService:
                 response = self._model_error_response(request, context, exc)
 
         await self._persist(request.message, response)
+        self._log_response(request, response)
         return response
+
+    def _log_response(self, request: ChatRequest, response: ChatResponse) -> None:
+        log_agent_event(
+            logger,
+            event="final_response",
+            message="project4 final response generated",
+            session_id=request.session_id,
+            route=response.route,
+            status=response.route,
+            attributes={
+                "response_length": len(response.response),
+                "citation_count": len(response.citations),
+                "has_sql": bool(response.generated_sql),
+                "has_tool_call": response.tool_call is not None,
+            },
+        )
 
     async def _answer_from_files(
         self,
@@ -227,6 +292,16 @@ class ProjectCopilotService:
                 preview=self.tools.preview(tool_call),
             )
             context.pending_actions[action_id] = tool_call
+            log_agent_event(
+                logger,
+                event="tool_execution",
+                message="project4 project API tool requires confirmation",
+                agent="tool_agent",
+                session_id=request.session_id,
+                tool_name=tool_call.name,
+                status="requires_confirmation",
+                attributes={"requires_confirmation": tool_call.requires_confirmation},
+            )
             return self._response(
                 request,
                 context,
@@ -237,6 +312,16 @@ class ProjectCopilotService:
                 log=DecisionLog(route="api_tool", reasoning=decision.reasoning, selected_data_source="project_api", tool_name=tool_call.name),
             )
         result = self.tools.execute(tool_call)
+        log_agent_event(
+            logger,
+            event="tool_execution",
+            message="project4 project API tool execution result",
+            agent="tool_agent",
+            session_id=request.session_id,
+            tool_name=tool_call.name,
+            status="executed" if result.ok else "failed",
+            attributes={"ok": result.ok, "error": result.error, "requires_confirmation": tool_call.requires_confirmation},
+        )
         self._update_context_from_tool(context, tool_call, result)
         return self._response(
             request,
@@ -253,6 +338,16 @@ class ProjectCopilotService:
         tool_call = context.pending_actions.pop(action_id, None)
         if tool_call is None:
             result = ToolResult(name="search_tasks", ok=False, error="No pending action found for that confirmation id.")
+            log_agent_event(
+                logger,
+                event="tool_execution",
+                message="project4 missing pending action confirmation",
+                agent="tool_agent",
+                session_id=request.session_id,
+                tool_name=result.name,
+                status="blocked",
+                attributes={"ok": result.ok, "error": result.error},
+            )
             return self._response(
                 request,
                 context,
@@ -262,6 +357,16 @@ class ProjectCopilotService:
                 log=DecisionLog(route="api_tool", reasoning="User attempted to confirm a missing pending action.", selected_data_source="project_api"),
             )
         result = self.tools.execute(tool_call)
+        log_agent_event(
+            logger,
+            event="tool_execution",
+            message="project4 confirmed project API tool execution result",
+            agent="tool_agent",
+            session_id=request.session_id,
+            tool_name=tool_call.name,
+            status="executed" if result.ok else "failed",
+            attributes={"ok": result.ok, "error": result.error, "requires_confirmation": tool_call.requires_confirmation},
+        )
         self._update_context_from_tool(context, tool_call, result)
         return self._response(
             request,

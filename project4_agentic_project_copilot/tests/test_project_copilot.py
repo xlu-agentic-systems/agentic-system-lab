@@ -383,6 +383,51 @@ def test_create_task_requires_confirmation_then_executes(tmp_path: Path) -> None
     assert rows[0]["title"] == "follow up with QA in project 1"
 
 
+def test_observability_logs_pending_and_confirmed_tool_execution(tmp_path: Path, monkeypatch) -> None:
+    events = []
+
+    def capture(_logger, **kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr("project4_agentic_project_copilot.app.service.log_agent_event", capture)
+    copilot = service(tmp_path)
+    proposed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="observable-tool",
+                message="Create task follow up with QA in project 1",
+            )
+        )
+    )
+
+    assert proposed.pending_action is not None
+    assert any(
+        event["event"] == "tool_execution"
+        and event.get("tool_name") == "create_task"
+        and event.get("status") == "requires_confirmation"
+        for event in events
+    )
+
+    confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="observable-tool",
+                message="Confirm action",
+                confirm_action_id=proposed.pending_action.action_id,
+            )
+        )
+    )
+
+    assert confirmed.tool_result is not None
+    assert confirmed.tool_result.ok is True
+    assert any(
+        event["event"] == "tool_execution"
+        and event.get("tool_name") == "create_task"
+        and event.get("status") == "executed"
+        for event in events
+    )
+
+
 def test_api_tools_reject_invalid_foreign_keys(tmp_path: Path) -> None:
     tools = ProjectToolService(CopilotDatabase(tmp_path / "copilot.sqlite3"))
 

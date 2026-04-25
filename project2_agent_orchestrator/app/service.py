@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 
+from agentic_system_lab.observability import log_agent_event
 from project2_agent_orchestrator.app.llm import LlmClient, OpenAILlmClient
 from project2_agent_orchestrator.app.models import (
     AgentName,
@@ -222,6 +223,14 @@ class ConversationService:
         trace: list[TraceEvent] = []
         state = await self.session_store.load(request.session_id, request.user_id)
         state.history.append(ChatMessage(role="user", content=request.message))
+        log_agent_event(
+            logger,
+            event="user_message",
+            message="project2 user message received",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            attributes={"message_length": len(request.message)},
+        )
         base_context = _merge_context(state.context, request.message)
         decision = await self._route_with_llm(request.message, base_context, state.history)
         context = _merge_context(base_context, request.message, decision.extracted_context)
@@ -254,6 +263,19 @@ class ConversationService:
             plan.mode,
             plan.reason,
         )
+        log_agent_event(
+            logger,
+            event="agent_decision",
+            message="project2 orchestrator decision",
+            agent="orchestrator_agent",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            status=plan.mode,
+            attributes={
+                "selected_agents": selected_agents,
+                "reason_length": len(decision.reasoning),
+            },
+        )
 
         agent_results = await self._execute_plan(plan, request.message, request.user_id, context, trace)
         agent_results = await self._maybe_escalate(
@@ -264,15 +286,39 @@ class ConversationService:
             agent_results,
             trace,
         )
-        await self._execute_backend_actions(agent_results, request.user_id, trace)
+        for result in agent_results:
+            log_agent_event(
+                logger,
+                event="agent_decision",
+                message="project2 agent result",
+                agent=result.agent,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status="needs_escalation" if result.needs_escalation else "complete",
+                attributes={
+                    "confidence": result.confidence,
+                    "proposed_action_count": len(result.proposed_actions),
+                    "reason_codes": result.reason_codes,
+                },
+            )
+        await self._execute_backend_actions(agent_results, request.user_id, request.session_id, trace)
 
         final_response = _aggregate_response(agent_results)
+        log_agent_event(
+            logger,
+            event="final_response",
+            message="project2 final response generated",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            status=plan.mode,
+            attributes={"response_length": len(final_response)},
+        )
         reasoning = _reasoning(selected_agents, plan, agent_results)
         state.history.append(ChatMessage(role="assistant", content=final_response))
         state.last_selected_agents = selected_agents
         await self.session_store.save(state)
 
-        logger.info("orchestrator final response: %s", final_response)
+        logger.info("orchestrator final response generated: length=%s", len(final_response))
         return ConversationResponse(
             session_id=request.session_id,
             selected_agents=selected_agents,
@@ -431,14 +477,44 @@ class ConversationService:
         self,
         agent_results: list[AgentResult],
         user_id: str,
+        session_id: str,
         trace: list[TraceEvent],
     ) -> None:
         for result in agent_results:
             for action in result.proposed_actions:
                 if action.name != "create_support_ticket" or action.requires_approval:
+                    log_agent_event(
+                        logger,
+                        event="tool_execution",
+                        message="project2 backend action not auto-executed",
+                        agent=result.agent,
+                        session_id=session_id,
+                        user_id=user_id,
+                        tool_name=action.name,
+                        status="requires_approval" if action.requires_approval else "not_auto_executable",
+                        attributes={
+                            "requires_approval": action.requires_approval,
+                            "safety": action.safety,
+                        },
+                    )
                     continue
                 backend_result = await validate_and_execute_action(self.tools, action, user_id=user_id)
                 result.backend_actions.append(backend_result)
+                log_agent_event(
+                    logger,
+                    event="tool_execution",
+                    message="project2 backend action validation result",
+                    agent=result.agent,
+                    session_id=session_id,
+                    user_id=user_id,
+                    tool_name=action.name,
+                    status=backend_result.status,
+                    attributes={
+                        "ok": backend_result.ok,
+                        "requires_approval": action.requires_approval,
+                        "error": backend_result.error,
+                    },
+                )
                 trace.append(
                     _trace(
                         "backend_action",

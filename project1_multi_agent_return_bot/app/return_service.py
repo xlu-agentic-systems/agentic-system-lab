@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from agentic_system_lab.observability import log_agent_event
 from project1_multi_agent_return_bot.app.llm import LlmClient, OpenAILlmClient
 from project1_multi_agent_return_bot.app.models import ChatMessage, PlannerOutput, ToolExecutionResult
 from project1_multi_agent_return_bot.app.return_agents import PlannerAgent, QAAgent, RoutingAgent
@@ -33,23 +34,78 @@ class ReturnConversationService:
 
     async def handle_message(self, request: ReturnConversationRequest) -> ReturnConversationResponse:
         logger.info(
-            "return chatbot user message: session_id=%s user_id=%s message=%s",
+            "return chatbot user message received: session_id=%s user_id=%s message_length=%s",
             request.session_id,
             request.user_id,
-            request.message,
+            len(request.message),
         )
         state = await self.session_store.load(request.session_id, request.user_id)
         state.history.append(ChatMessage(role="user", content=request.message))
+        log_agent_event(
+            logger,
+            event="user_message",
+            message="project1 user message received",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            attributes={"message_length": len(request.message)},
+        )
 
         routing = await self.routing_agent.run(request.message, state)
         state.context = routing.extracted_fields
+        log_agent_event(
+            logger,
+            event="agent_decision",
+            message="project1 routing agent decision",
+            agent="routing_agent",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            status=routing.intent,
+            attributes={
+                "missing_fields": routing.missing_fields,
+                "has_clarification": bool(routing.clarification_question),
+            },
+        )
 
         planner = await self.planner_agent.run(routing, request.user_id)
+        log_agent_event(
+            logger,
+            event="agent_decision",
+            message="project1 planner agent decision",
+            agent="planner_agent",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            status=planner.status,
+            attributes={
+                "reason_codes": planner.reason_codes,
+                "proposed_tool_count": len(planner.proposed_tool_calls),
+            },
+        )
         logger.info("return chatbot handoff: routing_agent -> planner_agent -> backend_tools")
         tool_results = await self._execute_tool_proposals(planner, user_id=request.user_id)
+        for result in tool_results:
+            log_agent_event(
+                logger,
+                event="tool_execution",
+                message="project1 backend tool validation result",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                tool_name=result.proposal.name,
+                status="executed" if result.executed else "blocked",
+                attributes={"ok": result.ok, "error": result.error},
+            )
 
         logger.info("return chatbot handoff: backend_tools -> qa_agent")
         response = await self.qa_agent.run(routing, planner, tool_results)
+        log_agent_event(
+            logger,
+            event="agent_decision",
+            message="project1 qa agent response generated",
+            agent="qa_agent",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            status=planner.status,
+            attributes={"response_length": len(response)},
+        )
         state.history.append(ChatMessage(role="assistant", content=response))
         state.last_status = planner.status
         await self.session_store.save(state)
@@ -65,7 +121,7 @@ class ReturnConversationService:
             )
         )
 
-        logger.info("return chatbot final response: %s", response)
+        logger.info("return chatbot final response generated: length=%s", len(response))
         return ReturnConversationResponse(
             session_id=request.session_id,
             user_id=request.user_id,

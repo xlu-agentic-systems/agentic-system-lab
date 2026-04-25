@@ -31,6 +31,8 @@ root-level `app/` package.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/latency_benchmark.md`: local latency/concurrency benchmark strategy,
   tooling, and interpretation guidance.
+- `docs/observability.md`: local Grafana/Loki stack, structured agent logs, and
+  the safe read-only `query_agent_logs` tool.
 - `docs/project4_rag_pipeline.md`: Project 4 RAG pipeline, document
   persistence, document library, retrieval, citations, and reindexing.
 - `project4_agentic_project_copilot/docs/architecture.md`: retrieval and
