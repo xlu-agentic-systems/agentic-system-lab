@@ -32,6 +32,24 @@ source .env
 set +a
 ```
 
+```mermaid
+flowchart LR
+    User["User or evaluator"]
+    API["FastAPI or CLI entry point"]
+    Store["JSON / JSONL storage"]
+    Backend["Backend orchestration and validation"]
+    LLM["OpenAI Responses API\nPydantic structured outputs"]
+    Artifacts["Response or evaluation artifacts"]
+
+    User --> API
+    API --> Store
+    API --> Backend
+    Backend --> LLM
+    LLM --> Backend
+    Backend --> Store
+    Backend --> Artifacts
+```
+
 ## Project 1: Multi-Agent Return Bot
 
 **Purpose:** demonstrate a fixed, returns-only agent workflow with routing,
@@ -48,25 +66,37 @@ planning, tool proposals, backend validation, and final customer messaging.
 
 ### Architecture
 
-```text
-HTTP request
-  -> JsonSessionStore.load(session_id, user_id)
-  -> RoutingAgent
-       output: RoutingOutput
-  -> backend routing normalization
-       fills missing_fields from merged session context
-  -> PlannerAgent
-       input: routing + backend order/item/policy facts
-       output: PlannerOutput
-  -> backend planner normalization
-       adds read tools, strips unsafe refund proposals when facts do not allow them
-  -> validate_and_execute_tool()
-       executes get_order / policy / eligibility / refund only after validation
-  -> QAAgent
-       output: customer response
-  -> JsonSessionStore.save()
-  -> ReturnConversationResponse
+```mermaid
+flowchart TD
+    Request["POST /returns/chat\nReturnConversationRequest"]
+    Load["JsonSessionStore.load\nsession_id + user_id"]
+    Routing["RoutingAgent\nLLM -> RoutingOutput"]
+    RoutingNorm["Backend routing normalization\nmerge context + compute missing fields"]
+    Clarify{"Missing required\nreturn fields?"}
+    ClarifyPlan["PlannerAgent deterministic result\nneeds_clarification + no tool proposals"]
+    IntentGate{"Return request?"}
+    DeterministicPlan["PlannerAgent deterministic result\npolicy info or unsupported intent"]
+    Planner["PlannerAgent\nLLM -> PlannerOutput"]
+    Facts["Backend facts\norder + item + product + policy + eligibility"]
+    PlannerNorm["Backend planner normalization\nadd read tools + strip unsafe refund proposals"]
+    Tools["validate_and_execute_tool\nbackend validation before side effects"]
+    QA["QAAgent\nLLM -> final customer response"]
+    Save["JsonSessionStore.save"]
+    Response["ReturnConversationResponse"]
+
+    Request --> Load --> Routing --> RoutingNorm --> Clarify
+    Clarify -- yes --> ClarifyPlan --> QA
+    Clarify -- no --> IntentGate
+    IntentGate -- no --> DeterministicPlan --> Tools
+    IntentGate -- yes --> Facts --> Planner --> PlannerNorm
+    PlannerNorm --> Tools --> QA --> Save --> Response
 ```
+
+The fixed pipeline always uses the same high-level stages. Clarification cases
+skip the planner LLM call and tool execution because `PlannerAgent` returns a
+deterministic `needs_clarification` result with no proposed tool calls.
+Policy questions and unsupported intents can also produce deterministic planner
+results before the planner LLM path.
 
 ### Agent Roles
 
@@ -138,28 +168,56 @@ decision selects one or more specialist agents and chooses execution mode.
 
 ### Architecture
 
-```text
-HTTP request
-  -> JsonSessionStore.load(session_id, user_id)
-  -> deterministic context extraction from message
-  -> Orchestrator LLM decision
-       output: OrchestratorDecision
-       selected_agents + execution_mode + extracted_context
-  -> backend execution-plan builder
-       single_agent | sequential | parallel
-  -> specialist agents
-       ReturnAgent / ShippingAgent / PaymentAgent / AccountAgent
-       output: AgentOutput from LLM
-  -> backend conversion
-       AgentOutput -> AgentResult with backend facts in details
-  -> escalation check
-       low confidence, needs_escalation, or disagreement
-  -> optional EscalationAgent
-  -> safe backend action execution
-       currently support ticket creation only
-  -> deterministic response aggregation
-  -> JsonSessionStore.save()
-  -> ConversationResponse
+```mermaid
+flowchart TD
+    Request["POST /chat\nConversationRequest"]
+    Load["JsonSessionStore.load\nsession_id + user_id"]
+    Context["Context merge\nsession context + deterministic ID extraction"]
+    Orch["Orchestrator LLM\nOrchestratorDecision"]
+    Plan["Backend execution-plan builder\nsingle_agent / sequential / parallel"]
+    Specialists{"Selected specialists"}
+    Return["ReturnAgent\nbackend facts + LLM AgentOutput"]
+    Shipping["ShippingAgent\nshipment facts + LLM AgentOutput"]
+    Payment["PaymentAgent\npayment facts + LLM AgentOutput"]
+    Account["AccountAgent\nprofile facts + LLM AgentOutput"]
+    Wrap["Backend conversion\nAgentOutput -> AgentResult"]
+    Escalate{"Low confidence,\nneeds escalation,\nor disagreement?"}
+    EscAgent["EscalationAgent\nLLM AgentOutput"]
+    Actions["Validate safe backend actions\nsupport ticket only"]
+    Aggregate["Deterministic aggregation"]
+    Save["JsonSessionStore.save"]
+    Response["ConversationResponse"]
+
+    Request --> Load --> Context --> Orch --> Plan --> Specialists
+    Specialists --> Return --> Wrap
+    Specialists --> Shipping --> Wrap
+    Specialists --> Payment --> Wrap
+    Specialists --> Account --> Wrap
+    Wrap --> Escalate
+    Escalate -- yes --> EscAgent --> Actions
+    Escalate -- no --> Actions
+    Actions --> Aggregate --> Save --> Response
+```
+
+Parallel plans use `asyncio.gather` for independent selected specialists.
+Sequential plans execute one specialist per step. In both cases, backend code
+builds the final plan from the LLM-requested mode and project-specific safety
+rules.
+
+```mermaid
+flowchart LR
+    Decision["OrchestratorDecision"]
+    Single["single_agent\none specialist"]
+    Sequential["sequential\nordered specialist calls"]
+    Parallel["parallel\nasyncio.gather"]
+    Escalation["optional escalation\nlow confidence or disagreement"]
+
+    Decision --> Single
+    Decision --> Sequential
+    Decision --> Parallel
+    Single --> Escalation
+    Sequential --> Escalation
+    Parallel --> Escalation
 ```
 
 ### Agent Roles
@@ -244,25 +302,29 @@ workflows without letting production agents rewrite themselves.
 
 ### Architecture
 
-```text
-completed traces
-  -> ConversationTraceStore
-  -> EvaluationAgent
-       output: EvaluationResult
-  -> backend evaluation normalization
-       detected issues force failed status and regression generation
-  -> TestCaseGenerator
-       output: GeneratedTestCase for failed traces
-  -> PromptImprovementAgent
-       output: PromptPatch(status="proposed")
-  -> GeneratedTestStore
-       JSONL cases + pytest regression file
-  -> PromptPatchStore
-       preserves approved/rejected status across regeneration
-  -> evaluation_report.md
-  -> optional human review endpoint
-       proposed -> approved | rejected
+```mermaid
+flowchart TD
+    Traces["sample_traces/traces.jsonl\ncompleted conversation traces"]
+    Eval["EvaluationAgent\nLLM -> EvaluationResult"]
+    Normalize["Backend evaluation normalization\nissues force failed status"]
+    Failed{"Requires\nregression?"}
+    TestGen["TestCaseGenerator\nLLM -> GeneratedTestCase"]
+    PatchGen["PromptImprovementAgent\nLLM -> PromptPatch proposed"]
+    TestStore["GeneratedTestStore\nregression_cases.jsonl + pytest file"]
+    PatchStore["PromptPatchStore\npreserve reviewed status"]
+    Report["evaluation_report.md"]
+    Review["POST /prompt-patches/review\napprove or reject"]
+
+    Traces --> Eval --> Normalize --> Failed
+    Failed -- no --> Report
+    Failed -- yes --> TestGen --> TestStore --> Report
+    Failed -- yes --> PatchGen --> PatchStore --> Report
+    PatchStore --> Review --> PatchStore
 ```
+
+Project 3 runs outside the production request path. It reviews completed traces,
+creates artifacts, and records patch review status; it does not apply prompt
+changes to Projects 1 or 2.
 
 ### Agent Roles
 
