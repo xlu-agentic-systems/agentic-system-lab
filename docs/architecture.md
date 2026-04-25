@@ -62,3 +62,18 @@ side-effect control.
 Refunds and payment changes are unsafe writes. Backend validation independently
 verifies order existence, ownership, item membership, exact amounts, and policy
 eligibility before any write is executed.
+
+## Project 3: Adaptive Evaluation System
+
+The adaptive evaluation system is implemented in
+`project3_adaptive_eval_system/app/service.py` and exposed at
+`POST /evaluations/run`.
+
+1. Load completed traces from a JSONL trace store.
+2. Run LLM-backed evaluation over each trace.
+3. Generate regression tests for failed traces.
+4. Propose prompt patches for human review.
+5. Write generated tests, prompt patch proposals, and a Markdown report.
+
+Project 3 is out of band from production traffic. It proposes improvements but
+does not automatically rewrite prompts or deploy behavior changes.

@@ -7,6 +7,7 @@ calls the Responses API and parses Pydantic structured outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
 - `POST /chat`: an orchestrator-led support flow
+- `POST /evaluations/run`: an out-of-band adaptive evaluation flow
 
 Set `OPENAI_API_KEY` before running the API. The repo includes `.env.example`;
 copy it to `.env`, fill the key, and source it before starting FastAPI:
@@ -75,6 +76,13 @@ That is represented by the Project 2 support orchestrator at `POST /chat`.
 The important difference is ownership of workflow. In this project, the backend
 orchestrator decides which agents run and how they run. The agents do not call
 each other, execute irreversible tools, or own session state.
+
+## Adaptive Evaluation
+
+Project 3 treats improvement as a harness around production systems, not as
+self-modifying production behavior. Completed traces are reviewed after the fact,
+failures become regression tests, and prompt changes remain proposed until a
+human approves them.
 
 ## LLM Integration
 
