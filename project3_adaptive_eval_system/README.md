@@ -19,6 +19,13 @@ proposals and are never applied automatically.
 - `PromptImprovementAgent`: proposes prompt patches that require human approval.
 - `EvaluationService`: orchestrates the feedback loop and writes artifacts.
 
+The Project 3 agent prompts are explicitly observability-aware. When imported
+traces include `loki_context`, the Evaluation Agent treats it as read-only
+Grafana/Loki evidence for agent decisions, handoffs, and tool execution status.
+The Prompt Improvement Agent may cite that telemetry in the rationale, but the
+trace remains the source of truth and production prompts are not edited by the
+feedback loop.
+
 ## Run
 
 ```bash
@@ -95,4 +102,8 @@ pytest -q project3_adaptive_eval_system/tests
 ```
 
 Coverage includes trace storage, evaluation behavior, regression generation,
-prompt patch safety, and the OpenAI structured-output adapter.
+prompt patch safety, the OpenAI structured-output adapter, and Project 1
+feedback integration using Loki/Grafana-shaped log payloads. The integration
+suite verifies that successful traces stay passed, blocked unsafe refunds
+produce proposed prompt patches with log evidence, and production prompt files
+are not mutated automatically.

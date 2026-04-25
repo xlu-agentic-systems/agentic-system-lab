@@ -191,12 +191,70 @@ def _policy_basis(trace: ReturnConversationTrace) -> str | None:
 
 
 def _summarize_loki_response(result: dict[str, Any]) -> str:
-    counts: dict[str, int] = {}
+    event_counts: dict[str, int] = {}
+    agent_status_counts: dict[str, int] = {}
+    tool_status_counts: dict[str, int] = {}
+    entry_count = 0
     streams = result.get("response", {}).get("data", {}).get("result", [])
     for stream in streams:
-        event = stream.get("stream", {}).get("event") or "unknown"
-        counts[event] = counts.get(event, 0) + len(stream.get("values", []))
-    if not counts:
+        labels = stream.get("stream", {})
+        for value in stream.get("values", []):
+            entry_count += 1
+            payload = _parse_loki_value(value)
+            event = _loki_field(payload, labels, "event") or "unknown"
+            event_counts[event] = event_counts.get(event, 0) + 1
+
+            if event == "agent_decision":
+                agent = _loki_field(payload, labels, "agent") or "unknown_agent"
+                status = _loki_field(payload, labels, "status") or "unknown_status"
+                key = f"{agent}:{status}"
+                agent_status_counts[key] = agent_status_counts.get(key, 0) + 1
+
+            if event == "tool_execution":
+                tool_name = _loki_field(payload, labels, "tool_name") or "unknown_tool"
+                status = _loki_field(payload, labels, "status") or "unknown_status"
+                key = f"{tool_name}:{status}"
+                tool_status_counts[key] = tool_status_counts.get(key, 0) + 1
+
+    if entry_count == 0:
         return "Loki returned no structured events for this Project 1 session."
-    parts = [f"{event}={count}" for event, count in sorted(counts.items())]
-    return f"Loki structured event counts: {', '.join(parts)}."
+
+    parts = [
+        f"entries={entry_count}",
+        f"events={_format_counts(event_counts)}",
+    ]
+    if agent_status_counts:
+        parts.append(f"agent_statuses={_format_counts(agent_status_counts)}")
+    if tool_status_counts:
+        parts.append(f"tool_statuses={_format_counts(tool_status_counts)}")
+    return f"Loki/Grafana structured context: {'; '.join(parts)}."
+
+
+def _parse_loki_value(value: Any) -> dict[str, Any]:
+    if not isinstance(value, (list, tuple)) or len(value) < 2 or not isinstance(value[1], str):
+        return {}
+    try:
+        decoded = json.loads(value[1])
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _loki_field(payload: dict[str, Any], labels: dict[str, Any], key: str) -> str | None:
+    direct = payload.get(key)
+    if direct is not None:
+        return str(direct)
+
+    agentic_event = payload.get("agentic_event")
+    if isinstance(agentic_event, dict) and agentic_event.get(key) is not None:
+        return str(agentic_event[key])
+
+    for label_key in (key, f"agentic_event_{key}"):
+        value = labels.get(label_key)
+        if value is not None:
+            return str(value)
+    return None
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    return ",".join(f"{key}={value}" for key, value in sorted(counts.items()))

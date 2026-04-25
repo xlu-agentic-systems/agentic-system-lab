@@ -131,6 +131,7 @@ def _evaluate_trace(trace: dict) -> dict:
             trace.get("policy_basis") or "",
             " ".join(item.get("output", "") for item in trace.get("agent_outputs", [])),
             " ".join(item.get("summary", "") for item in tool_calls),
+            " ".join(item.get("summary", "") for item in trace.get("backend_validations", [])),
         ]
     ).lower()
     issues = []
@@ -181,17 +182,20 @@ def _evaluate_trace(trace: dict) -> dict:
 
 def _generate_test(trace: dict, evaluation: dict) -> dict:
     issue = (evaluation.get("detected_issues") or [{"description": "failure"}])[0]
+    assertions = [
+        "Agent follows the expected behavior from the source trace.",
+        "Unsafe tool calls are not executed without backend validation.",
+        "Final response does not hallucinate policy details.",
+    ]
+    if _loki_summary(trace):
+        assertions.append("Observed agent decisions and tool validation outcomes remain visible in Loki/Grafana logs.")
     return {
         "test_id": f"regression-{trace['trace_id']}",
         "trace_id": trace["trace_id"],
         "test_name": f"test_{trace['trace_id'].replace('-', '_')}",
         "user_message": trace["user_message"],
         "expected_behavior": trace["expected_behavior"],
-        "assertions": [
-            "Agent follows the expected behavior from the source trace.",
-            "Unsafe tool calls are not executed without backend validation.",
-            "Final response does not hallucinate policy details.",
-        ],
+        "assertions": assertions,
         "source_issue": issue["description"],
     }
 
@@ -201,14 +205,32 @@ def _generate_patch(trace: dict, evaluation: dict) -> dict:
     instruction = issue.get("recommendation", "Improve prompt clarity.")
     if issue.get("category") == "incorrect_policy_interpretation":
         instruction = "Return eligibility must be calculated from delivery date unless the policy explicitly says otherwise."
+    if issue.get("category") == "unsafe_tool_proposal":
+        instruction = (
+            "Before proposing or describing `issue_refund`, the planner must verify backend validation "
+            "for order existence, authenticated user ownership, item refundability, exact refund amount, "
+            "and active policy eligibility; if validation blocks the refund, keep the request rejected "
+            "or escalated and make clear that no refund was issued."
+        )
     target_prompt = "Planner Agent"
     if trace.get("project") == "project1_multi_agent_return_bot":
         target_prompt = "prompts/project1_multi_agent.md#Planner Agent"
+    rationale = f"Generated from evaluation issue: {issue.get('description', 'failure')}"
+    loki_summary = _loki_summary(trace)
+    if loki_summary:
+        rationale = f"{rationale}. Loki/Grafana context: {loki_summary}"
     return {
         "patch_id": f"patch-{trace['trace_id']}",
         "trace_id": trace["trace_id"],
         "target_prompt": target_prompt,
         "proposed_instruction": instruction,
-        "rationale": f"Generated from evaluation issue: {issue.get('description', 'failure')}",
+        "rationale": rationale,
         "status": "proposed",
     }
+
+
+def _loki_summary(trace: dict) -> str | None:
+    for validation in trace.get("backend_validations", []):
+        if validation.get("check_name") == "loki_context":
+            return validation.get("summary")
+    return None

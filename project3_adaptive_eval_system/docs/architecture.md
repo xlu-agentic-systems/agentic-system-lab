@@ -57,6 +57,20 @@ Grafana remains the human UI for logs. Project 3 does not read Grafana directly.
 When observability context is requested, Project 3 queries Loki through the safe
 `LokiLogQueryTool`, using the Project 1 `session_id`.
 
+The Project 3 prompts now distinguish trace facts from telemetry evidence:
+
+- the Evaluation Agent may use `loki_context` to corroborate agent decisions,
+  handoffs, and tool execution status
+- the Test Case Generator can turn log-supported failures into assertions about
+  observable decisions and validation outcomes
+- the Prompt Improvement Agent can cite Grafana/Loki evidence in the patch
+  rationale, while keeping the patch proposed for human review
+
+The integration tests use Loki/Grafana-shaped responses captured from the local
+observability flow: user message events, routing/planner/QA decisions, and
+backend tool execution events. They verify both the passing path and a blocked
+unsafe-refund path.
+
 ## LLM Boundary
 
 The default runtime client is `OpenAILlmClient`, which calls the OpenAI Responses
