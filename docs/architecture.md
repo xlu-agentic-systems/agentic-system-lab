@@ -28,6 +28,9 @@ All four projects use these common boundaries:
   local JSON logs and can optionally push those events to Loki for Grafana
   inspection. Agent-facing observability access goes through a constrained
   read-only query tool, not arbitrary shell or Grafana admin APIs.
+- **Adaptive-feedback boundary:** Project 3 can import Project 1 traces and
+  session-scoped Loki context to propose prompt patches, but it does not apply
+  those patches to Project 1 automatically.
 
 The `.env` file is not auto-loaded. For local real-LLM runs:
 

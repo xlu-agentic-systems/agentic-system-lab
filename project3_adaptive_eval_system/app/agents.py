@@ -22,6 +22,9 @@ class EvaluationAgent:
                 "response helpfulness, escalation correctness, latency awareness, and context preservation. "
                 "Detect incorrect policy interpretation, missing clarification, unsafe tool proposal, "
                 "hallucinated policy, poor communication, unnecessary escalation, and context loss. "
+                "When backend validations include `loki_context`, treat it as read-only Grafana/Loki "
+                "observability evidence: use it to corroborate agent decisions, tool execution status, "
+                "handoffs, and missing telemetry, but do not infer unlogged user content or apply changes. "
                 "Return only the structured EvaluationResult."
             ),
             user_payload={"trace": trace.model_dump(mode="json")},
@@ -39,7 +42,9 @@ class TestCaseGenerator:
             system_prompt=(
                 "You are the Test Case Generator for an adaptive evaluation harness. Convert a failed "
                 "conversation trace into a replayable regression case. Include concrete assertions that "
-                "capture the expected future behavior. Return only the structured GeneratedTestCase."
+                "capture the expected future behavior. If Grafana/Loki evidence helped identify the "
+                "failure, include assertions for observable handoffs, agent decisions, or tool validation "
+                "outcomes. Return only the structured GeneratedTestCase."
             ),
             user_payload={
                 "trace": trace.model_dump(mode="json"),
@@ -59,6 +64,8 @@ class PromptImprovementAgent:
             system_prompt=(
                 "You are the Prompt Improvement Agent for an adaptive evaluation harness. Suggest one "
                 "small prompt patch that would prevent the detected failure. Do not apply the patch. "
+                "If Grafana/Loki context is present, cite it in the rationale only as supporting telemetry "
+                "and keep trace facts separate from log evidence. "
                 "Set status to proposed because human approval is required. Return only the structured "
                 "PromptPatch."
             ),

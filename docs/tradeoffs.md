@@ -58,6 +58,11 @@ block the customer request. It can generate reports, tests, and patch proposals.
 The tradeoff is delayed impact: Project 3 does not fix production behavior by
 itself. It creates artifacts that humans can review and apply later.
 
+Project 3 can import Project 1 return-bot traces and optional Loki context. That
+improves debugging and prompt-patch evidence, but the production chatbot still
+stays stable: logs and traces are inputs to review, not automatic prompt
+deployment signals.
+
 ## Structured Outputs
 
 All four projects use Pydantic structured outputs through the OpenAI Responses

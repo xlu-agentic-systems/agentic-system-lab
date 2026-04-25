@@ -117,3 +117,22 @@ class EvaluationRunResult(BaseModel):
 class PromptPatchReviewRequest(BaseModel):
     patch_id: str
     approved: bool
+
+
+class Project1FeedbackRunRequest(BaseModel):
+    trace_path: str | None = None
+    trace_limit: int | None = Field(default=None, ge=1)
+    include_loki_context: bool = False
+    loki_since_minutes: int = Field(default=60, ge=1, le=1440)
+
+
+class Project1TraceImportResult(BaseModel):
+    source_path: str
+    imported_count: int
+    trace_ids: list[str]
+    included_loki_context: bool = False
+
+
+class Project1FeedbackRunResult(BaseModel):
+    import_result: Project1TraceImportResult
+    evaluation_result: EvaluationRunResult
