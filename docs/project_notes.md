@@ -36,6 +36,8 @@ Use `docs/` for design and workflow notes. It keeps the repository readable:
 - `README.md`: quick start, purpose, and high-level explanation.
 - `docs/architecture.md`: system design, sequence diagram, safety boundaries.
 - `docs/tradeoffs.md`: cross-project architecture tradeoffs and non-goals.
+- `docs/mcp_architecture.md`: conceptual Model Context Protocol architecture
+  and how MCP could wrap shared tools/resources in a future iteration.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/project_notes.md`: implementation rationale and agentic coding workflow.
 
