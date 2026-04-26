@@ -8,6 +8,7 @@ agentic-system-lab/
   project2_agent_orchestrator/
   project3_adaptive_eval_system/
   project4_agentic_project_copilot/
+  project5_agentic_metadata_demo/
   docs/
   prompts/
 ```
@@ -19,6 +20,9 @@ agentic-system-lab/
 - `project3_adaptive_eval_system`: LLM-backed adaptive evaluation harness.
 - `project4_agentic_project_copilot`: orchestrated RAG, safe text-to-SQL, and
   confirmed project API tool-use copilot.
+- `project5_agentic_metadata_demo`: deterministic metadata microservice with an
+  optional agentic natural-language layer that uses the service endpoints as
+  tools.
 
 Shared architecture notes live in `docs/`. Project-specific implementation and
 tests live inside each project folder so PRs can coexist without competing over a

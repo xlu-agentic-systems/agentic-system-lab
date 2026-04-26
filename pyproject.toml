@@ -9,6 +9,7 @@ dependencies = [
   "pydantic>=2.6",
   "pypdf>=4.0",
   "python-multipart>=0.0.9",
+  "sqlalchemy>=2.0",
   "starlette<1.0",
   "uvicorn[standard]>=0.27",
 ]
@@ -29,5 +30,6 @@ testpaths = [
   "project3_adaptive_eval_system/tests",
   "project3_adaptive_eval_system/generated_tests",
   "project4_agentic_project_copilot/tests",
+  "project5_agentic_metadata_demo/tests",
 ]
 pythonpath = ["."]

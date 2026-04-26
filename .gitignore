@@ -11,4 +11,5 @@ project2_agent_orchestrator/data/sessions.json
 project4_agentic_project_copilot/data/*.sqlite3
 project4_agentic_project_copilot/data/sessions.json
 project4_agentic_project_copilot/data/conversation_traces.jsonl
+project5_agentic_metadata_demo/metadata.db
 *.egg-info/
