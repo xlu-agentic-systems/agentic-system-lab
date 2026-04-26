@@ -632,6 +632,11 @@ Example MCP client configuration:
 }
 ```
 
+For a reusable agent-facing setup checklist, see
+[`skills/project5-metadata-mcp/SKILL.md`](skills/project5-metadata-mcp/SKILL.md).
+That skill includes the `mcp_servers.project5Metadata` verification flow and
+the caller identity fields required by each tool.
+
 The MCP server advertises these tools:
 
 - `list_datasets`
