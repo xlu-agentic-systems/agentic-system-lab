@@ -21,6 +21,7 @@ Project 1 completed trace
   -> Prompt Improvement Agent
   -> generated_tests/
   -> prompt_patches.jsonl
+  -> optional prompt_candidates/
   -> evaluation_report.md
 ```
 
@@ -37,8 +38,12 @@ Project 1 completed trace
 4. `TestCaseGenerator` converts failed traces into regression cases stored in
    `generated_tests/`.
 5. `PromptImprovementAgent` proposes a single prompt patch per failed trace.
-6. `EvaluationService` orchestrates the run and writes the Markdown report.
-7. `POST /prompt-patches/review` simulates human approval or rejection of a
+6. `LabeledCaseStore` loads benchmark cases with expected pass/fail outcomes,
+   issue categories, regression requirements, and patch targets.
+7. `EvaluationService` orchestrates the run and writes the Markdown report.
+8. Approved prompt patches can be rendered into candidate prompt files under
+   `prompt_candidates/`.
+9. `POST /prompt-patches/review` simulates human approval or rejection of a
    proposed patch.
 
 ## Project 1 Feedback Loop
@@ -51,6 +56,7 @@ Project 1 /returns/chat
   -> evaluation + regression generation
   -> proposed prompt patch targeting prompts/project1_multi_agent.md
   -> human review
+  -> approved candidate prompt file
 ```
 
 Grafana remains the human UI for logs. Project 3 does not read Grafana directly.
@@ -71,6 +77,28 @@ observability flow: user message events, routing/planner/QA decisions, and
 backend tool execution events. They verify both the passing path and a blocked
 unsafe-refund path.
 
+## Evaluation Depth
+
+Project 3 includes a labeled benchmark harness. Each case defines the source
+`ConversationTrace`, expected pass/fail result, expected issue categories,
+whether a regression should be generated, and the expected prompt patch target
+when a patch is needed.
+
+The benchmark reports pass/fail accuracy, issue-category recall, patch-target
+accuracy, and a quality assessment. This is stronger than only checking whether
+an LLM produced plausible prose because it measures evaluator behavior against
+known failures such as purchase-date policy mistakes, unsafe refund proposals,
+missing clarification questions, hallucinated policy details, and context loss.
+
+## Prompt Promotion
+
+Prompt patches still require human approval. After approval, Project 3 can
+render a candidate prompt file under `prompt_candidates/`. That file contains
+the original prompt plus the approved proposed instruction and rationale. The
+production prompt is not modified by the adaptive loop; a developer must review
+the candidate, run regressions, and merge the prompt change through normal code
+review.
+
 ## LLM Boundary
 
 The default runtime client is `OpenAILlmClient`, which calls the OpenAI Responses
@@ -90,6 +118,8 @@ Adaptive feedback is intentionally separated from production behavior:
 - prompt patches are stored with `status="proposed"`
 - prompt patch status changes only through the explicit review endpoint
 - no prompt patch is applied automatically
+- approved patches produce candidate files instead of directly editing
+  production prompts
 - human review is required before production prompts change
 - imported Project 1 traces are normalized copies; importing does not change
   Project 1 sessions, tools, or prompt behavior

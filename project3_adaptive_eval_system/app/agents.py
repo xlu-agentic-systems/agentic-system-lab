@@ -22,6 +22,8 @@ class EvaluationAgent:
                 "response helpfulness, escalation correctness, latency awareness, and context preservation. "
                 "Detect incorrect policy interpretation, missing clarification, unsafe tool proposal, "
                 "hallucinated policy, poor communication, unnecessary escalation, and context loss. "
+                "Prefer evidence that can be checked against labeled evaluation cases: pass/fail, issue "
+                "category, regression requirement, and patch target. "
                 "When backend validations include `loki_context`, treat it as read-only Grafana/Loki "
                 "observability evidence: use it to corroborate agent decisions, tool execution status, "
                 "handoffs, and missing telemetry, but do not infer unlogged user content or apply changes. "
@@ -44,7 +46,8 @@ class TestCaseGenerator:
                 "conversation trace into a replayable regression case. Include concrete assertions that "
                 "capture the expected future behavior. If Grafana/Loki evidence helped identify the "
                 "failure, include assertions for observable handoffs, agent decisions, or tool validation "
-                "outcomes. Return only the structured GeneratedTestCase."
+                "outcomes. Prefer assertions that are replayable in CI and map back to the labeled issue "
+                "category. Return only the structured GeneratedTestCase."
             ),
             user_payload={
                 "trace": trace.model_dump(mode="json"),
@@ -66,6 +69,8 @@ class PromptImprovementAgent:
                 "small prompt patch that would prevent the detected failure. Do not apply the patch. "
                 "If Grafana/Loki context is present, cite it in the rationale only as supporting telemetry "
                 "and keep trace facts separate from log evidence. "
+                "Target the smallest relevant prompt surface so approved patches can be rendered into a "
+                "candidate prompt file and validated before production use. "
                 "Set status to proposed because human approval is required. Return only the structured "
                 "PromptPatch."
             ),

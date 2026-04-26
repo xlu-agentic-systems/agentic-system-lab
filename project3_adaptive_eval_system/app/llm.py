@@ -159,6 +159,66 @@ def _evaluate_trace(trace: dict) -> dict:
                 "recommendation": "Require backend validation before refund execution.",
             }
         )
+    if trace.get("outcome") == "failure" and (
+        "clarification" in text or "missing field" in text or "missing information" in text
+    ):
+        issues.append(
+            {
+                "category": "missing_clarification_question",
+                "severity": "medium",
+                "description": "The agent did not ask for required missing information before continuing.",
+                "evidence": "Trace expected a clarification step before planning or answering.",
+                "recommendation": "Ask a focused clarification question when required fields are missing.",
+            }
+        )
+    if trace.get("outcome") == "failure" and (
+        "hallucinated" in text or "invented policy" in text or "not in policy" in text
+    ):
+        issues.append(
+            {
+                "category": "hallucinated_policy",
+                "severity": "high",
+                "description": "The agent relied on a policy detail that was not supported by backend facts.",
+                "evidence": "Trace indicates the policy detail was hallucinated or absent from policy basis.",
+                "recommendation": "Only state policy details that appear in retrieved policy or backend validation results.",
+            }
+        )
+    if trace.get("outcome") == "failure" and (
+        "unnecessary escalation" in text or "should not escalate" in text
+    ):
+        issues.append(
+            {
+                "category": "unnecessary_escalation",
+                "severity": "medium",
+                "description": "The agent escalated despite enough information to resolve the request.",
+                "evidence": "Trace expected direct resolution instead of escalation.",
+                "recommendation": "Escalate only when confidence is low, policy is ambiguous, or a sensitive action requires human review.",
+            }
+        )
+    if trace.get("outcome") == "failure" and (
+        "context loss" in text or "lost context" in text or "forgot current" in text
+    ):
+        issues.append(
+            {
+                "category": "context_loss",
+                "severity": "medium",
+                "description": "The agent failed to preserve relevant session context.",
+                "evidence": "Trace indicates the current project, task, order, or prior decision was forgotten.",
+                "recommendation": "Load and preserve session context before routing or answering follow-up turns.",
+            }
+        )
+    if trace.get("outcome") == "failure" and (
+        "poor communication" in text or "unclear response" in text or "confusing response" in text
+    ):
+        issues.append(
+            {
+                "category": "poor_customer_communication",
+                "severity": "low",
+                "description": "The final response did not clearly explain status or next steps.",
+                "evidence": "Trace expected clearer customer-facing communication.",
+                "recommendation": "Explain final status, reason, and next step in concise customer-support language.",
+            }
+        )
     passed = trace.get("outcome") == "success" and not issues
     score = 5 if passed else 2
     return {
@@ -211,6 +271,31 @@ def _generate_patch(trace: dict, evaluation: dict) -> dict:
             "for order existence, authenticated user ownership, item refundability, exact refund amount, "
             "and active policy eligibility; if validation blocks the refund, keep the request rejected "
             "or escalated and make clear that no refund was issued."
+        )
+    if issue.get("category") == "missing_clarification_question":
+        instruction = (
+            "If required fields are missing for the current workflow, ask one focused clarification question "
+            "and do not plan backend tools until the missing fields are supplied."
+        )
+    if issue.get("category") == "hallucinated_policy":
+        instruction = (
+            "Only describe policy details that were retrieved from the policy tool or validated backend facts; "
+            "if the policy basis is missing, say that the policy must be checked before answering."
+        )
+    if issue.get("category") == "unnecessary_escalation":
+        instruction = (
+            "Escalate only when policy or backend facts are ambiguous, confidence is low, or a sensitive "
+            "operation requires human handling; otherwise resolve directly from validated facts."
+        )
+    if issue.get("category") == "context_loss":
+        instruction = (
+            "Before routing a follow-up turn, load session context and preserve the current order, item, "
+            "project, task, and prior decision unless the user explicitly changes them."
+        )
+    if issue.get("category") == "poor_customer_communication":
+        instruction = (
+            "The final response must clearly state the decision, the validated reason, and the next step "
+            "without adding unsupported policy details."
         )
     target_prompt = "Planner Agent"
     if trace.get("project") == "project1_multi_agent_return_bot":

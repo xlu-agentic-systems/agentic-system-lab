@@ -18,6 +18,7 @@ IssueCategory = Literal[
 ]
 Severity = Literal["low", "medium", "high"]
 PatchStatus = Literal["proposed", "approved", "rejected"]
+QualityGateStatus = Literal["passed", "failed"]
 
 
 class AgentOutputRecord(BaseModel):
@@ -102,6 +103,18 @@ class PromptPatch(BaseModel):
     status: PatchStatus = "proposed"
 
 
+class QualityGate(BaseModel):
+    name: str
+    status: QualityGateStatus
+    summary: str
+
+
+class QualityAssessment(BaseModel):
+    evaluation_depth_score: float = Field(ge=0, le=10)
+    production_readiness_score: float = Field(ge=0, le=10)
+    gates: list[QualityGate]
+
+
 class EvaluationRunRequest(BaseModel):
     trace_limit: int | None = Field(default=None, ge=1)
 
@@ -112,6 +125,7 @@ class EvaluationRunResult(BaseModel):
     generated_tests: list[GeneratedTestCase]
     prompt_patches: list[PromptPatch]
     report_path: str
+    quality_assessment: QualityAssessment | None = None
 
 
 class PromptPatchReviewRequest(BaseModel):
@@ -136,3 +150,54 @@ class Project1TraceImportResult(BaseModel):
 class Project1FeedbackRunResult(BaseModel):
     import_result: Project1TraceImportResult
     evaluation_result: EvaluationRunResult
+
+
+class LabeledEvaluationCase(BaseModel):
+    case_id: str
+    trace: ConversationTrace
+    expected_passed: bool
+    expected_issue_categories: list[IssueCategory] = Field(default_factory=list)
+    expected_requires_regression: bool
+    expected_patch_target: str | None = None
+
+
+class LabeledCaseResult(BaseModel):
+    case_id: str
+    trace_id: str
+    passed: bool
+    expected_passed: bool
+    requires_regression: bool
+    expected_requires_regression: bool
+    detected_issue_categories: list[IssueCategory]
+    expected_issue_categories: list[IssueCategory]
+    matched_pass_fail: bool
+    matched_regression: bool
+    matched_issue_categories: bool
+    matched_patch_target: bool | None = None
+
+
+class EvaluationBenchmarkResult(BaseModel):
+    case_count: int
+    passed_cases: int
+    pass_fail_accuracy: float
+    issue_category_recall: float
+    patch_target_accuracy: float | None = None
+    case_results: list[LabeledCaseResult]
+    quality_assessment: QualityAssessment | None = None
+
+
+class BenchmarkRunRequest(BaseModel):
+    case_path: str | None = None
+
+
+class PromptPatchPromotionRequest(BaseModel):
+    patch_id: str
+    source_prompt_path: str | None = None
+
+
+class PromptPatchPromotionResult(BaseModel):
+    patch_id: str
+    source_prompt_path: str
+    candidate_prompt_path: str
+    validation_passed: bool
+    validation_messages: list[str]

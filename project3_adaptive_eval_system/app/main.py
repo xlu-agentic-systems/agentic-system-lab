@@ -4,12 +4,16 @@ from fastapi import FastAPI, HTTPException
 
 from agentic_system_lab.observability import configure_observability_logging
 from project3_adaptive_eval_system.app.models import (
+    BenchmarkRunRequest,
     EvaluationRunRequest,
     EvaluationRunResult,
+    EvaluationBenchmarkResult,
     Project1FeedbackRunRequest,
     Project1FeedbackRunResult,
     Project1TraceImportResult,
     PromptPatch,
+    PromptPatchPromotionRequest,
+    PromptPatchPromotionResult,
     PromptPatchReviewRequest,
 )
 from project3_adaptive_eval_system.app.service import EvaluationService
@@ -29,6 +33,11 @@ async def health() -> dict[str, str]:
 @app.post("/evaluations/run", response_model=EvaluationRunResult)
 async def run_evaluation(request: EvaluationRunRequest) -> EvaluationRunResult:
     return await service.run_evaluation(request.trace_limit)
+
+
+@app.post("/evaluations/benchmark", response_model=EvaluationBenchmarkResult)
+async def run_labeled_benchmark(request: BenchmarkRunRequest) -> EvaluationBenchmarkResult:
+    return await service.run_labeled_benchmark(request.case_path)
 
 
 @app.post("/project1/import-traces", response_model=Project1TraceImportResult)
@@ -55,5 +64,18 @@ async def run_project1_feedback(request: Project1FeedbackRunRequest) -> Project1
 async def review_prompt_patch(request: PromptPatchReviewRequest) -> PromptPatch:
     try:
         return service.review_prompt_patch(request.patch_id, request.approved)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/prompt-patches/promote-candidate", response_model=PromptPatchPromotionResult)
+async def promote_prompt_patch_candidate(
+    request: PromptPatchPromotionRequest,
+) -> PromptPatchPromotionResult:
+    try:
+        return service.promote_prompt_patch_candidate(
+            request.patch_id,
+            source_prompt_path=request.source_prompt_path,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
