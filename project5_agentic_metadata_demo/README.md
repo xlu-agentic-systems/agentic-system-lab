@@ -77,6 +77,10 @@ Human wants flexible exploration:
 
 Another service/agent wants tool-use composition:
   -> call POST /agent/tasks with structured intent
+
+MCP-capable agent wants standard tool discovery:
+  -> connect to the Project 5 MCP server
+      -> call exposed metadata MCP tools
 ```
 
 ## What Is Traditional Here?
@@ -217,6 +221,7 @@ project5_agentic_metadata_demo/
     llm_agent.py          # Optional OpenAI tool-calling agent
     rule_based_agent.py   # Local fallback agent
     structured_agent.py   # Machine-facing task runner over the same tools
+    mcp_server.py         # Optional MCP adapter over the same metadata tools
     auth.py               # Demo identity and policy gates
   tests/
     test_metadata_service.py
@@ -273,6 +278,10 @@ Agent endpoints:
 - `POST /agent/query`
 - `POST /agent/tasks`
 
+Optional MCP adapter:
+
+- `python3 -m project5_agentic_metadata_demo.app.mcp_server`
+
 ## Demo Authentication And Policy
 
 All endpoints except `/health` require demo identity headers:
@@ -318,6 +327,10 @@ The agent can call these metadata tools:
 
 Each tool is a wrapper around a REST call to the metadata service. This keeps
 the agent inside the same backend contract used by traditional services.
+
+The MCP adapter exposes the same tool names to MCP-capable agents. MCP callers
+do not receive raw database access; MCP tool calls still go through
+`MetadataTools`, the metadata REST API, and the same policy checks.
 
 ## Setup
 
@@ -581,7 +594,103 @@ errors[0].message explains that delete requires admin or service role
 tool_calls shows the attempted delete_dataset call
 ```
 
-## Walkthrough 4: Risk Gating
+## Walkthrough 4: MCP Tool Access
+
+MCP stands for Model Context Protocol. In this project, MCP is an optional
+adapter for external MCP-capable agents that want to discover and call metadata
+tools using a standard agent-tool protocol.
+
+The MCP server is not the source of truth. It is another access adapter:
+
+```text
+External MCP-capable Agent
+  -> MCP tool call
+      -> Project 5 MCP server
+          -> MetadataTools
+              -> Metadata REST API
+                  -> Policy checks
+                      -> SQLite
+```
+
+Start the MCP server over stdio:
+
+```bash
+python3 -m project5_agentic_metadata_demo.app.mcp_server
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "project5-metadata": {
+      "command": "python3",
+      "args": ["-m", "project5_agentic_metadata_demo.app.mcp_server"],
+      "cwd": "/path/to/agentic-system-lab"
+    }
+  }
+}
+```
+
+The MCP server advertises these tools:
+
+- `list_datasets`
+- `search_datasets`
+- `get_dataset`
+- `get_schema`
+- `get_lineage`
+- `create_dataset`
+- `update_dataset`
+- `delete_dataset`
+
+Every MCP tool requires caller identity arguments:
+
+```json
+{
+  "caller_user": "service-a",
+  "caller_team": "platform",
+  "caller_role": "service"
+}
+```
+
+That is intentional. MCP does not bypass policy. The metadata service still
+needs a caller identity to decide what the tool is allowed to read or write.
+
+Example MCP tool call payload for `search_datasets`:
+
+```json
+{
+  "caller_user": "service-a",
+  "caller_team": "platform",
+  "caller_role": "service",
+  "owner_team": "finance",
+  "keyword": "revenue"
+}
+```
+
+Example blocked MCP tool call:
+
+```json
+{
+  "tool": "get_schema",
+  "arguments": {
+    "caller_user": "ana",
+    "caller_team": "analytics",
+    "caller_role": "viewer",
+    "dataset_id": 1
+  }
+}
+```
+
+That call is denied because `dataset_id=1` is high-sensitivity finance
+metadata, and the caller is an analytics viewer.
+
+Use MCP when an external agent runtime needs standard tool discovery. Use
+`/agent/tasks` when a regular backend service wants a stable HTTP/JSON
+contract. Use the metadata REST API directly when the caller knows the exact
+operation it wants.
+
+## Walkthrough 5: Risk Gating
 
 Try a cross-team sensitive read as an analytics viewer:
 
@@ -696,6 +805,13 @@ Good: /agent/query for humans, /agent/tasks for services and other agents.
 Risky: forcing service callers to parse prose from a chat-style endpoint.
 ```
 
+Use MCP as an adapter, not the core service:
+
+```text
+Good: MCP tools call the same metadata REST API and policy layer.
+Risky: MCP tools open direct SQL access or bypass service authorization.
+```
+
 ## What This Demo Does Not Yet Include
 
 This is intentionally a small local demo. A production system would usually add:
@@ -707,6 +823,7 @@ This is intentionally a small local demo. A production system would usually add:
 - rate limits and abuse detection
 - stronger prompt-injection defenses for retrieved content
 - separate deployment boundaries for the metadata service and agent service
+- production MCP authentication instead of demo caller identity arguments
 
 ## Tests
 
