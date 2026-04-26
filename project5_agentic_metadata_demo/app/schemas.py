@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,3 +83,37 @@ class AgentQueryResponse(BaseModel):
     answer: str
     tool_calls: list[ToolCallRecord]
     raw_results: dict[str, Any]
+
+
+class DatasetFilters(BaseModel):
+    owner_team: str | None = None
+    sensitivity_level: str | None = None
+    keyword: str | None = None
+
+
+class AgentTaskRequest(BaseModel):
+    task: Literal["find_datasets", "get_dataset", "create_dataset", "update_dataset", "delete_dataset"]
+    filters: DatasetFilters | None = None
+    include: list[Literal["schema", "lineage"]] = Field(default_factory=list)
+    dataset_id: int | None = None
+    dataset: DatasetCreate | None = None
+    updates: DatasetUpdate | None = None
+    confirm_dangerous_action: bool = False
+    reason: str | None = None
+
+
+class AgentTaskError(BaseModel):
+    tool: str
+    status_code: int
+    message: str
+
+
+class AgentTaskResponse(BaseModel):
+    status: Literal["completed", "blocked", "failed"]
+    answer: str
+    datasets: list[dict[str, Any]] = Field(default_factory=list)
+    schemas_by_dataset_id: dict[str, Any] = Field(default_factory=dict)
+    lineage_by_dataset_id: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+    raw_results: dict[str, Any] = Field(default_factory=dict)
+    errors: list[AgentTaskError] = Field(default_factory=list)

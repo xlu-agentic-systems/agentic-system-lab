@@ -70,6 +70,20 @@ def main() -> None:
             ANALYTICS_VIEWER,
             {"question": "find datasets owned by finance"},
         ),
+        (
+            "structured task cross-team read is filtered by policy",
+            "POST",
+            "/agent/tasks",
+            ANALYTICS_VIEWER,
+            {"task": "find_datasets", "filters": {"owner_team": "finance"}},
+        ),
+        (
+            "structured task editor delete is blocked by policy",
+            "POST",
+            "/agent/tasks",
+            FINANCE_EDITOR,
+            {"task": "delete_dataset", "dataset_id": 1, "confirm_dangerous_action": True},
+        ),
     ]
 
     for name, method, path, headers, payload in cases:
@@ -91,4 +105,3 @@ def _summarize(body: Any) -> Any:
 
 if __name__ == "__main__":
     main()
-

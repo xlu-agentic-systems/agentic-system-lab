@@ -50,6 +50,14 @@ User
       -> Metadata Tool
           -> Metadata Microservice
               -> SQLite metadata.db
+
+Agent/service path:
+
+Other Agent or Service
+  -> Structured Agent Task API
+      -> Metadata Tool
+          -> Metadata Microservice
+              -> SQLite metadata.db
 ```
 
 Both paths reach the same metadata service. That is the key design point.
@@ -57,6 +65,19 @@ Both paths reach the same metadata service. That is the key design point.
 The agent does not query SQLite. It does not own metadata rules. It does not
 silently bypass REST APIs. It chooses tools, and those tools call the metadata
 service.
+
+Project 5 exposes three caller-facing paths:
+
+```text
+Caller knows the exact operation:
+  -> call the metadata REST API directly
+
+Human wants flexible exploration:
+  -> call POST /agent/query with natural language
+
+Another service/agent wants tool-use composition:
+  -> call POST /agent/tasks with structured intent
+```
 
 ## What Is Traditional Here?
 
@@ -191,10 +212,11 @@ project5_agentic_metadata_demo/
     schemas.py            # Pydantic request/response models
     seed.py               # Sample metadata seed data
     metadata_service.py   # Deterministic REST API
-    agent_service.py      # Natural-language agent endpoint
+    agent_service.py      # Natural-language and structured task endpoints
     tools.py              # Tool facade over metadata REST endpoints
     llm_agent.py          # Optional OpenAI tool-calling agent
     rule_based_agent.py   # Local fallback agent
+    structured_agent.py   # Machine-facing task runner over the same tools
     auth.py               # Demo identity and policy gates
   tests/
     test_metadata_service.py
@@ -246,9 +268,10 @@ Write endpoints:
 - `PATCH /datasets/{dataset_id}`
 - `DELETE /datasets/{dataset_id}`
 
-Agent endpoint:
+Agent endpoints:
 
 - `POST /agent/query`
+- `POST /agent/tasks`
 
 ## Demo Authentication And Policy
 
@@ -461,7 +484,104 @@ The `tool_calls` field is intentionally exposed. It makes the agent's behavior
 inspectable and helps verify that the agent used service tools rather than
 direct database access.
 
-## Walkthrough 3: Risk Gating
+## Walkthrough 3: Structured Agent/Service Access
+
+This simulates another agent or backend service that wants the agentic layer to
+compose metadata tools, but does not want to rely on free-form natural language.
+
+The endpoint is:
+
+```text
+POST /agent/tasks
+```
+
+The caller provides a structured task:
+
+```json
+{
+  "task": "find_datasets",
+  "filters": {
+    "owner_team": "finance",
+    "keyword": "revenue"
+  },
+  "include": ["schema"],
+  "reason": "Build a finance metadata dashboard."
+}
+```
+
+Run it:
+
+```bash
+curl -X POST http://127.0.0.1:8005/agent/tasks \
+  -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
+  -d '{"task":"find_datasets","filters":{"owner_team":"finance","keyword":"revenue"},"include":["schema"],"reason":"Build a finance metadata dashboard."}'
+```
+
+Expected response shape:
+
+```json
+{
+  "status": "completed",
+  "answer": "Found 2 dataset(s) with schemas.",
+  "datasets": [],
+  "schemas_by_dataset_id": {},
+  "lineage_by_dataset_id": {},
+  "tool_calls": [
+    {
+      "tool": "search_datasets",
+      "arguments": {
+        "owner_team": "finance",
+        "keyword": "revenue"
+      }
+    },
+    {
+      "tool": "get_schema",
+      "arguments": {
+        "dataset_id": 1
+      }
+    }
+  ],
+  "raw_results": {},
+  "errors": []
+}
+```
+
+Supported structured tasks:
+
+- `find_datasets`
+- `get_dataset`
+- `create_dataset`
+- `update_dataset`
+- `delete_dataset`
+
+Use `/agent/tasks` when the caller is a machine and needs predictable fields
+such as `status`, `datasets`, `schemas_by_dataset_id`, `tool_calls`, and
+`errors`. Use `/agent/query` when the caller is a human and natural language is
+the desired interface.
+
+Example blocked write through the structured interface:
+
+```bash
+curl -X POST http://127.0.0.1:8005/agent/tasks \
+  -H "Content-Type: application/json" \
+  -H "X-User: fran" \
+  -H "X-Team: finance" \
+  -H "X-Role: editor" \
+  -d '{"task":"delete_dataset","dataset_id":1,"confirm_dangerous_action":true}'
+```
+
+Expected behavior:
+
+```text
+status = blocked
+errors[0].message explains that delete requires admin or service role
+tool_calls shows the attempted delete_dataset call
+```
+
+## Walkthrough 4: Risk Gating
 
 Try a cross-team sensitive read as an analytics viewer:
 
@@ -532,8 +652,9 @@ The script tries:
 - sensitive record creation
 - direct deletes
 - agent-driven deletes
+- structured task deletes
 - database wipe prompts
-- cross-team agent reads
+- cross-team agent and task reads
 
 Expected behavior is denial or filtered results. The important point is that the
 denial comes from deterministic service policy, not model politeness.
@@ -566,6 +687,13 @@ Treat agentic access as additive:
 ```text
 Good: existing services keep using REST endpoints.
 Risky: all metadata access must go through natural language.
+```
+
+Separate human and machine-facing agent interfaces:
+
+```text
+Good: /agent/query for humans, /agent/tasks for services and other agents.
+Risky: forcing service callers to parse prose from a chat-style endpoint.
 ```
 
 ## What This Demo Does Not Yet Include
