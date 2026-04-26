@@ -11,7 +11,7 @@ from project1_multi_agent_return_bot.app.models import (
 )
 from project1_multi_agent_return_bot.app.trace_store import ReturnConversationTrace
 from project3_adaptive_eval_system.app.llm import RuleBasedLlmClient
-from project3_adaptive_eval_system.app.models import ConversationTrace
+from project3_adaptive_eval_system.app.models import ConversationTrace, PromptPatch
 from project3_adaptive_eval_system.app.project1_feedback import Project1FeedbackAdapter
 from project3_adaptive_eval_system.app.service import EvaluationService
 from project3_adaptive_eval_system.app.store import (
@@ -258,6 +258,93 @@ def test_project1_trace_import_deduplicates_by_trace_id(tmp_path: Path) -> None:
 
     assert first.trace_ids == second.trace_ids
     assert len(trace_store.load_traces()) == 1
+
+
+def test_labeled_benchmark_measures_evaluation_depth_and_quality_gates(tmp_path: Path) -> None:
+    eval_service = EvaluationService(
+        trace_store=ConversationTraceStore(tmp_path / "traces.jsonl"),
+        generated_test_store=GeneratedTestStore(tmp_path / "generated" / "regression_cases.jsonl"),
+        prompt_patch_store=PromptPatchStore(tmp_path / "patches.jsonl"),
+        report_path=tmp_path / "evaluation_report.md",
+        llm_client=RuleBasedLlmClient(),
+    )
+
+    result = run(eval_service.run_labeled_benchmark())
+
+    assert result.case_count >= 6
+    assert result.pass_fail_accuracy == 1.0
+    assert result.issue_category_recall == 1.0
+    assert result.patch_target_accuracy == 1.0
+    assert result.quality_assessment is not None
+    assert result.quality_assessment.evaluation_depth_score >= 8.5
+    assert result.quality_assessment.production_readiness_score >= 7.0
+    assert all(gate.status == "passed" for gate in result.quality_assessment.gates)
+
+
+def test_approved_prompt_patch_promotes_to_candidate_without_mutating_source(tmp_path: Path) -> None:
+    prompt_path = Path("prompts/project1_multi_agent.md")
+    prompt_before = prompt_path.read_text()
+    patch_store = PromptPatchStore(tmp_path / "patches.jsonl")
+    patch_store.save_patches(
+        [
+            PromptPatch(
+                patch_id="patch-1",
+                trace_id="trace-1",
+                target_prompt="prompts/project1_multi_agent.md#Planner Agent",
+                proposed_instruction="Require backend validation before refund messaging.",
+                rationale="Unsafe refund was blocked by validation.",
+                status="proposed",
+            )
+        ]
+    )
+    patch_store.review_patch("patch-1", approved=True)
+    eval_service = EvaluationService(
+        trace_store=ConversationTraceStore(tmp_path / "traces.jsonl"),
+        generated_test_store=GeneratedTestStore(tmp_path / "generated" / "regression_cases.jsonl"),
+        prompt_patch_store=patch_store,
+        report_path=tmp_path / "evaluation_report.md",
+        llm_client=RuleBasedLlmClient(),
+        prompt_candidate_dir=tmp_path / "prompt_candidates",
+    )
+
+    result = eval_service.promote_prompt_patch_candidate("patch-1")
+
+    assert result.validation_passed is True
+    assert "candidate prompt written" in " ".join(result.validation_messages)
+    assert prompt_path.read_text() == prompt_before
+    candidate_text = Path(result.candidate_prompt_path).read_text()
+    assert "Candidate Prompt Patch" in candidate_text
+    assert "Require backend validation before refund messaging." in candidate_text
+
+
+def test_unapproved_prompt_patch_cannot_promote_candidate(tmp_path: Path) -> None:
+    patch_store = PromptPatchStore(tmp_path / "patches.jsonl")
+    patch_store.save_patches(
+        [
+            PromptPatch(
+                patch_id="patch-1",
+                trace_id="trace-1",
+                target_prompt="prompts/project1_multi_agent.md#Planner Agent",
+                proposed_instruction="Require backend validation before refund messaging.",
+                rationale="Unsafe refund was blocked by validation.",
+                status="proposed",
+            )
+        ]
+    )
+    eval_service = EvaluationService(
+        trace_store=ConversationTraceStore(tmp_path / "traces.jsonl"),
+        generated_test_store=GeneratedTestStore(tmp_path / "generated" / "regression_cases.jsonl"),
+        prompt_patch_store=patch_store,
+        report_path=tmp_path / "evaluation_report.md",
+        llm_client=RuleBasedLlmClient(),
+        prompt_candidate_dir=tmp_path / "prompt_candidates",
+    )
+
+    result = eval_service.promote_prompt_patch_candidate("patch-1")
+
+    assert result.validation_passed is False
+    assert "approved" in " ".join(result.validation_messages)
+    assert not Path(result.candidate_prompt_path).exists()
 
 
 class FakeLokiTool:

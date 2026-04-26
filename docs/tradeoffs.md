@@ -63,6 +63,11 @@ improves debugging and prompt-patch evidence, but the production chatbot still
 stays stable: logs and traces are inputs to review, not automatic prompt
 deployment signals.
 
+The newer labeled benchmark and candidate-prompt workflow improve evaluation
+depth and production readiness, but add maintenance work. The labeled cases must
+stay representative, and candidate prompts still require human review and
+regression testing before any production prompt file changes.
+
 ## Structured Outputs
 
 All four projects use Pydantic structured outputs through the OpenAI Responses

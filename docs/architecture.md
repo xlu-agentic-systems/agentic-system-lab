@@ -30,7 +30,9 @@ All four projects use these common boundaries:
   read-only query tool, not arbitrary shell or Grafana admin APIs.
 - **Adaptive-feedback boundary:** Project 3 can import Project 1 traces and
   session-scoped Loki context to propose prompt patches, but it does not apply
-  those patches to Project 1 automatically.
+  those patches to Project 1 automatically. It also includes labeled evaluation
+  cases and an approved-patch candidate prompt workflow so evaluator quality and
+  prompt promotion are measurable before production prompt changes.
 
 The `.env` file is not auto-loaded. For local real-LLM runs:
 

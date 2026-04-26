@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from project3_adaptive_eval_system.app.models import (
     ConversationTrace,
     GeneratedTestCase,
+    LabeledEvaluationCase,
     PromptPatch,
 )
 
@@ -17,6 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TRACE_PATH = PROJECT_ROOT / "sample_traces" / "traces.jsonl"
 DEFAULT_GENERATED_TEST_PATH = PROJECT_ROOT / "generated_tests" / "regression_cases.jsonl"
 DEFAULT_PROMPT_PATCH_PATH = PROJECT_ROOT / "prompt_patches.jsonl"
+DEFAULT_LABELED_CASE_PATH = PROJECT_ROOT / "eval_cases" / "labeled_cases.jsonl"
+DEFAULT_PROMPT_CANDIDATE_DIR = PROJECT_ROOT / "prompt_candidates"
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -86,6 +89,20 @@ class PromptPatchStore(JsonlStore):
             self.write_all(patches)
             return reviewed
         raise KeyError(f"prompt patch not found: {patch_id}")
+
+    def get_patch(self, patch_id: str) -> PromptPatch:
+        for patch in self.read(PromptPatch):
+            if patch.patch_id == patch_id:
+                return patch
+        raise KeyError(f"prompt patch not found: {patch_id}")
+
+
+class LabeledCaseStore(JsonlStore):
+    def __init__(self, path: Path | str = DEFAULT_LABELED_CASE_PATH) -> None:
+        super().__init__(path)
+
+    def load_cases(self) -> list[LabeledEvaluationCase]:
+        return self.read(LabeledEvaluationCase)
 
 
 def _write_python_regression_file(tests: list[GeneratedTestCase], path: Path) -> None:

@@ -18,6 +18,8 @@ proposals and are never applied automatically.
 - `TestCaseGenerator`: turns failed traces into replayable regression cases.
 - `PromptImprovementAgent`: proposes prompt patches that require human approval.
 - `EvaluationService`: orchestrates the feedback loop and writes artifacts.
+- `LabeledCaseStore`: loads labeled benchmark cases with expected pass/fail
+  outcomes, issue categories, regression requirements, and patch targets.
 
 The Project 3 agent prompts are explicitly observability-aware. When imported
 traces include `loki_context`, the Evaluation Agent treats it as read-only
@@ -63,9 +65,34 @@ uvicorn project3_adaptive_eval_system.app.main:app --reload
 Then call `POST /evaluations/run`, or `POST /project1/feedback/run` for the
 Project 1 adaptive feedback path.
 
+To measure evaluation depth against labeled cases:
+
+```bash
+python -m project3_adaptive_eval_system.app.cli benchmark
+```
+
+This command uses the default runtime LLM client, so `OPENAI_API_KEY` must be
+set. For a local deterministic dry run without network calls:
+
+```bash
+python -m project3_adaptive_eval_system.app.cli benchmark --use-rule-based
+```
+
+Unit tests use the deterministic rule-based client to avoid network calls.
+
 Prompt patches can be reviewed through `POST /prompt-patches/review`. This is
 the simulated human review layer; patches remain `proposed` until that endpoint
 explicitly approves or rejects them.
+
+After a patch is approved, render it into a reviewable candidate prompt without
+mutating production prompts:
+
+```bash
+python -m project3_adaptive_eval_system.app.cli promote-candidate PATCH_ID
+```
+
+Candidate prompts are written under `prompt_candidates/` and must still be
+reviewed, tested, and merged manually.
 
 ## Real LLM Calls
 
@@ -83,6 +110,7 @@ prompt improvements:
 - proposed patches are stored with `status="proposed"`
 - a human must approve a patch before it can become active
 - approval is simulated through the prompt-patch review endpoint
+- approved patches render to candidate prompt files, not directly to production
 - generated tests are regression artifacts, not production behavior changes
 - Loki/Grafana logs are observability evidence only; Project 3 queries Loki
   through the safe read-only log tool and does not scrape Grafana or mutate
@@ -91,9 +119,12 @@ prompt improvements:
 ## Generated Artifacts
 
 - `sample_traces/`: good and bad conversation traces
+- `eval_cases/`: labeled benchmark cases for evaluation-quality measurement
 - `generated_tests/`: generated regression test cases
 - `prompt_patches.jsonl`: proposed prompt patches
+- `prompt_candidates/`: approved-patch candidate prompt files for review
 - `evaluation_report.md`: latest Markdown evaluation report
+- `evaluation_quality_report.md`: current labeled benchmark summary
 
 ## Tests
 
@@ -102,8 +133,8 @@ pytest -q project3_adaptive_eval_system/tests
 ```
 
 Coverage includes trace storage, evaluation behavior, regression generation,
-prompt patch safety, the OpenAI structured-output adapter, and Project 1
-feedback integration using Loki/Grafana-shaped log payloads. The integration
-suite verifies that successful traces stay passed, blocked unsafe refunds
-produce proposed prompt patches with log evidence, and production prompt files
-are not mutated automatically.
+prompt patch safety, the OpenAI structured-output adapter, labeled benchmark
+metrics, candidate prompt promotion, and Project 1 feedback integration using
+Loki/Grafana-shaped log payloads. The integration suite verifies that successful
+traces stay passed, blocked unsafe refunds produce proposed prompt patches with
+log evidence, and production prompt files are not mutated automatically.
