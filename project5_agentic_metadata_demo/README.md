@@ -81,29 +81,94 @@ Then check:
 curl http://localhost:8005/health
 ```
 
+## Demo Authentication And Policy
+
+All metadata and agent endpoints except `/health` require demo identity headers:
+
+```text
+X-User: service-a
+X-Team: platform
+X-Role: service
+```
+
+Supported roles are `viewer`, `editor`, `admin`, and `service`.
+
+Policy rules:
+
+- `viewer` can read public/internal datasets and datasets owned by their team.
+- `editor` can create or update non-sensitive metadata for their own team.
+- `admin` and `service` can create or update across teams.
+- Deletes require `admin` or `service` plus
+  `X-Confirm-Dangerous-Action: true`.
+- The agent forwards the caller identity to the metadata service, so model
+  behavior cannot bypass backend policy.
+
 ## Direct Metadata Microservice Calls
 
 These calls represent another backend service using the deterministic metadata
 API directly.
 
 ```bash
-curl http://localhost:8005/datasets
+curl http://localhost:8005/datasets \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service"
 ```
 
 ```bash
-curl "http://localhost:8005/datasets/search?owner_team=finance&keyword=revenue"
+curl "http://localhost:8005/datasets/search?owner_team=finance&keyword=revenue" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service"
 ```
 
 ```bash
-curl http://localhost:8005/datasets/1
+curl http://localhost:8005/datasets/1 \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service"
 ```
 
 ```bash
-curl http://localhost:8005/datasets/1/schema
+curl http://localhost:8005/datasets/1/schema \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service"
 ```
 
 ```bash
-curl http://localhost:8005/datasets/3/lineage
+curl http://localhost:8005/datasets/3/lineage \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service"
+```
+
+Write endpoint examples:
+
+```bash
+curl -X POST http://localhost:8005/datasets \
+  -H "Content-Type: application/json" \
+  -H "X-User: fran" \
+  -H "X-Team: finance" \
+  -H "X-Role: editor" \
+  -d '{"name":"finance_public_metrics","description":"Published finance metrics.","owner_team":"finance","data_source":"metrics_store","sensitivity_level":"internal"}'
+```
+
+```bash
+curl -X PATCH http://localhost:8005/datasets/2 \
+  -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
+  -d '{"description":"Updated by a backend service through the stable metadata API."}'
+```
+
+```bash
+curl -X DELETE http://localhost:8005/datasets/8 \
+  -H "X-User: admin" \
+  -H "X-Team: security" \
+  -H "X-Role: admin" \
+  -H "X-Confirm-Dangerous-Action: true"
 ```
 
 ## Agentic Natural-Language Calls
@@ -114,18 +179,27 @@ metadata tools.
 ```bash
 curl -X POST http://localhost:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"show all datasets"}'
 ```
 
 ```bash
 curl -X POST http://localhost:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"Find revenue-related datasets owned by the finance team and show their schemas."}'
 ```
 
 ```bash
 curl -X POST http://localhost:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"show lineage for user profile dataset"}'
 ```
 
@@ -161,10 +235,10 @@ In another terminal, test the deterministic metadata service path:
 
 ```bash
 curl http://127.0.0.1:8005/health
-curl http://127.0.0.1:8005/datasets
-curl "http://127.0.0.1:8005/datasets/search?owner_team=finance&keyword=revenue"
-curl http://127.0.0.1:8005/datasets/1/schema
-curl http://127.0.0.1:8005/datasets/3/lineage
+curl http://127.0.0.1:8005/datasets -H "X-User: service-a" -H "X-Team: platform" -H "X-Role: service"
+curl "http://127.0.0.1:8005/datasets/search?owner_team=finance&keyword=revenue" -H "X-User: service-a" -H "X-Team: platform" -H "X-Role: service"
+curl http://127.0.0.1:8005/datasets/1/schema -H "X-User: service-a" -H "X-Team: platform" -H "X-Role: service"
+curl http://127.0.0.1:8005/datasets/3/lineage -H "X-User: service-a" -H "X-Team: platform" -H "X-Role: service"
 ```
 
 Expected results:
@@ -181,24 +255,36 @@ Then test the natural-language agent path:
 ```bash
 curl -X POST http://127.0.0.1:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"show all datasets"}'
 ```
 
 ```bash
 curl -X POST http://127.0.0.1:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"Find revenue-related datasets owned by the finance team and show their schemas."}'
 ```
 
 ```bash
 curl -X POST http://127.0.0.1:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"show lineage for user profile dataset"}'
 ```
 
 ```bash
 curl -X POST http://127.0.0.1:8005/agent/query \
   -H "Content-Type: application/json" \
+  -H "X-User: service-a" \
+  -H "X-Team: platform" \
+  -H "X-Role: service" \
   -d '{"question":"find sensitive datasets"}'
 ```
 
@@ -214,6 +300,21 @@ Expected agent behavior:
 
 Every agent response should include `answer`, `tool_calls`, and `raw_results`.
 
+## Evil Client Smoke Test
+
+With the server running, execute the adversarial client script:
+
+```bash
+METADATA_DEMO_URL=http://127.0.0.1:8005 python3 -m project5_agentic_metadata_demo.evil_clients
+```
+
+The script tries unauthenticated reads, cross-team sensitive reads, sensitive
+record creation, direct deletes, agent-driven deletes, database wipe prompts,
+and cross-team agent reads. Expected behavior is denial or filtered results. In
+particular, a finance editor can ask the agent to delete a revenue dataset, but
+the metadata service denies the `delete_dataset` tool call because delete
+requires admin/service role and explicit dangerous-action confirmation.
+
 ## Metadata Tools
 
 The agent can call only these tool functions:
@@ -223,6 +324,9 @@ The agent can call only these tool functions:
 - `get_dataset`
 - `get_schema`
 - `get_lineage`
+- `create_dataset`
+- `update_dataset`
+- `delete_dataset`
 
 Each tool calls a metadata microservice REST endpoint internally. This preserves
 the production-style boundary where the metadata service owns database access,

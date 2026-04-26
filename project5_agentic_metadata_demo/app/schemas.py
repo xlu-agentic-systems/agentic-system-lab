@@ -27,6 +27,27 @@ class DatasetRead(BaseModel):
     sensitivity_level: str
 
 
+class DatasetCreate(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    owner_team: str = Field(min_length=1)
+    data_source: str = Field(min_length=1)
+    sensitivity_level: str = Field(min_length=1)
+
+
+class DatasetUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, min_length=1)
+    owner_team: str | None = Field(default=None, min_length=1)
+    data_source: str | None = Field(default=None, min_length=1)
+    sensitivity_level: str | None = Field(default=None, min_length=1)
+
+
+class DeleteDatasetResponse(BaseModel):
+    deleted: bool
+    dataset_id: int
+
+
 class DatasetSchemaRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -62,4 +83,3 @@ class AgentQueryResponse(BaseModel):
     answer: str
     tool_calls: list[ToolCallRecord]
     raw_results: dict[str, Any]
-
