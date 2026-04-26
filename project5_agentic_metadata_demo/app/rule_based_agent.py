@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from project5_agentic_metadata_demo.app.schemas import AgentQueryResponse, ToolCallRecord
-from project5_agentic_metadata_demo.app.tools import MetadataTools
+from project5_agentic_metadata_demo.app.tools import MetadataToolError, MetadataTools
 
 
 OWNER_ALIASES = {
@@ -44,6 +44,68 @@ async def run_rule_based_agent(question: str, tools: MetadataTools) -> AgentQuer
     owner_team = _extract_owner(normalized)
     sensitivity_level = _extract_sensitivity(normalized)
     keyword = _extract_keyword(normalized)
+
+    if _asks_for_database_delete(normalized):
+        return AgentQueryResponse(
+            answer="I cannot delete the database. The agent has no raw database access, and destructive operations are gated by metadata service policy.",
+            tool_calls=tool_calls,
+            raw_results=raw_results,
+        )
+
+    if _asks_for_dataset_delete(normalized):
+        datasets = await _find_candidate_datasets(tool_calls, raw_results, tools, owner_team, sensitivity_level, keyword)
+        if not datasets:
+            return AgentQueryResponse(
+                answer="I could not find a matching dataset to delete.",
+                tool_calls=tool_calls,
+                raw_results=raw_results,
+            )
+        result = await _record_tool_allowing_policy_denial(
+            tool_calls,
+            raw_results,
+            tools,
+            "delete_dataset",
+            {"dataset_id": datasets[0]["id"]},
+        )
+        if isinstance(result, dict) and result.get("error"):
+            return AgentQueryResponse(
+                answer=f"The delete request was blocked: {result['error']}",
+                tool_calls=tool_calls,
+                raw_results=raw_results,
+            )
+        return AgentQueryResponse(
+            answer=f"Deleted dataset {datasets[0]['name']}.",
+            tool_calls=tool_calls,
+            raw_results=raw_results,
+        )
+
+    if _asks_for_sensitivity_update(normalized):
+        datasets = await _find_candidate_datasets(tool_calls, raw_results, tools, owner_team, sensitivity_level, keyword)
+        if not datasets:
+            return AgentQueryResponse(
+                answer="I could not find a matching dataset to update.",
+                tool_calls=tool_calls,
+                raw_results=raw_results,
+            )
+        requested_sensitivity = "public" if "public" in normalized else "high"
+        result = await _record_tool_allowing_policy_denial(
+            tool_calls,
+            raw_results,
+            tools,
+            "update_dataset",
+            {"dataset_id": datasets[0]["id"], "sensitivity_level": requested_sensitivity},
+        )
+        if isinstance(result, dict) and result.get("error"):
+            return AgentQueryResponse(
+                answer=f"The update request was blocked: {result['error']}",
+                tool_calls=tool_calls,
+                raw_results=raw_results,
+            )
+        return AgentQueryResponse(
+            answer=f"Updated dataset {result['name']} sensitivity to {result['sensitivity_level']}.",
+            tool_calls=tool_calls,
+            raw_results=raw_results,
+        )
 
     if "schema" in normalized:
         datasets = await _find_candidate_datasets(tool_calls, raw_results, tools, owner_team, sensitivity_level, keyword)
@@ -111,8 +173,37 @@ async def _record_tool(
     return result
 
 
+async def _record_tool_allowing_policy_denial(
+    tool_calls: list[ToolCallRecord],
+    raw_results: dict[str, Any],
+    tools: MetadataTools,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> Any:
+    clean_arguments = {key: value for key, value in arguments.items() if value is not None}
+    tool_calls.append(ToolCallRecord(tool=tool_name, arguments=clean_arguments))
+    try:
+        result = await tools.call(tool_name, clean_arguments)
+    except MetadataToolError as exc:
+        result = {"error": exc.message, "status_code": exc.status_code}
+    raw_results[f"{len(tool_calls)}_{tool_name}"] = result
+    return result
+
+
 def _asks_for_all_datasets(question: str) -> bool:
     return any(phrase in question for phrase in ("show all datasets", "list all datasets", "all datasets"))
+
+
+def _asks_for_database_delete(question: str) -> bool:
+    return any(phrase in question for phrase in ("delete the db", "delete the database", "drop database", "wipe database"))
+
+
+def _asks_for_dataset_delete(question: str) -> bool:
+    return any(word in question for word in ("delete", "remove", "drop")) and "dataset" in question
+
+
+def _asks_for_sensitivity_update(question: str) -> bool:
+    return any(word in question for word in ("make", "set", "change", "update")) and "sensitivity" in question
 
 
 def _extract_owner(question: str) -> str | None:
