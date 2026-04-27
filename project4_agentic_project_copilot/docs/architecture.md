@@ -66,10 +66,12 @@ Embeddings are generated before the SQLite write transaction starts. The
 transaction only inserts the document and chunks, which avoids holding a write
 lock while waiting on external embedding calls.
 
-After document inserts and deletes, the system reindexes the local vector store
-by recomputing embeddings for all remaining stored chunks. This is deliberately
-simple for the MVP. A production system would usually replace this full reindex
-with an incremental vector index update plus background repair jobs.
+Document chunk inserts, text updates, and deletes are captured in a local
+`document_index_events` table through SQLite triggers. The app processes pending
+events immediately after upload/delete for read-after-write freshness, while
+keeping the event log durable enough for a later background worker. Insert and
+text-update events refresh only affected chunk embeddings; delete events are
+marked processed after the chunk is gone.
 
 In production, the same logical split would map to:
 
@@ -110,4 +112,5 @@ It still uses the Project 2 orchestrator idea, but routes by capability rather
 than by customer-support domain.
 
 For the end-to-end upload, persistence, retrieval, citation, document-library,
-and reindexing flow, see `../../docs/project4_rag_pipeline.md`.
+chunking benchmark, and freshness flow, see `../../docs/project4_rag_pipeline.md`
+and `../../docs/project4_rag_chunking_freshness.md`.

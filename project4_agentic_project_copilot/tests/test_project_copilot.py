@@ -4,6 +4,7 @@ from pathlib import Path
 from openai.lib._pydantic import to_strict_json_schema
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
+from project4_agentic_project_copilot.app.document_store import chunk_text
 from project4_agentic_project_copilot.app.embeddings import HashEmbeddingClient
 from project4_agentic_project_copilot.app.llm import RuleBasedLlmClient
 from project4_agentic_project_copilot.app.models import ChatRequest, FileAnswer, OrchestratorDecision, SqlPlan, ToolCall
@@ -247,7 +248,22 @@ def test_file_upload_retrieval_answers_with_citations(tmp_path: Path) -> None:
     assert response.citations[0].filename == "launch_brief.md"
 
 
-def test_document_library_select_delete_and_reindex(tmp_path: Path) -> None:
+def test_chunking_strategies_preserve_semantic_boundaries() -> None:
+    text = (
+        "Intro sentence about rollout gates. Second sentence keeps the API contract detail together.\n\n"
+        "Another paragraph covers customer migration owners and import dry runs."
+    )
+
+    fixed = chunk_text(text, chunk_size=70, overlap=10, strategy="fixed")
+    paragraph = chunk_text(text, chunk_size=70, overlap=10, strategy="paragraph")
+    sentence = chunk_text(text, chunk_size=70, overlap=0, strategy="sentence")
+
+    assert len(fixed) >= 2
+    assert any("Another paragraph covers customer migration" in chunk for chunk in paragraph)
+    assert any(chunk.startswith("Second sentence") for chunk in sentence)
+
+
+def test_document_library_select_delete_and_event_driven_freshness(tmp_path: Path) -> None:
     embedding_client = CountingHashEmbeddingClient()
     copilot = ProjectCopilotService(
         db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
@@ -276,8 +292,9 @@ def test_document_library_select_delete_and_reindex(tmp_path: Path) -> None:
     documents = run(copilot.list_documents()).documents
 
     assert first.reindexed_chunk_count == 1
-    assert second.reindexed_chunk_count == 2
-    assert embedding_client.calls == 5
+    assert second.reindexed_chunk_count == 1
+    assert embedding_client.calls == 2
+    assert copilot.document_store.pending_index_event_count() == 0
     assert {document.filename for document in documents} == {"first.md", "second.md"}
 
     selected = run(copilot.select_document(session_id="library", document_id=first.document_id))
@@ -291,11 +308,45 @@ def test_document_library_select_delete_and_reindex(tmp_path: Path) -> None:
     remaining = run(copilot.list_documents()).documents
 
     assert deleted.deleted is True
-    assert deleted.reindexed_chunk_count == 1
+    assert deleted.reindexed_chunk_count == 0
     assert deleted.context is not None
     assert deleted.context.current_document_id is None
-    assert embedding_client.calls == 7
+    assert embedding_client.calls == 3
     assert [document.document_id for document in remaining] == [second.document_id]
+
+
+def test_cdc_chunk_text_update_refreshes_embedding(tmp_path: Path) -> None:
+    embedding_client = CountingHashEmbeddingClient()
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=RuleBasedLlmClient(),
+        embedding_client=embedding_client,
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    upload = run(
+        copilot.upload_file(
+            filename="freshness.md",
+            content_type="text/markdown",
+            content=b"# Freshness\nOriginal chunk text.",
+            session_id="freshness",
+        )
+    )
+    with copilot.db.connect() as conn:
+        conn.execute(
+            "UPDATE document_chunks SET text = ? WHERE chunk_id = ?",
+            ("Updated chunk text from a CDC-style change.", f"{upload.document_id}:0"),
+        )
+        conn.commit()
+
+    assert copilot.document_store.pending_index_event_count() == 1
+    freshness = run(copilot.document_store.process_pending_index_events())
+
+    assert freshness.processed_event_count == 1
+    assert freshness.reindexed_chunk_count == 1
+    assert copilot.document_store.pending_index_event_count() == 0
+    assert embedding_client.calls == 2
 
 
 def test_sql_question_generates_valid_read_only_sql(tmp_path: Path) -> None:

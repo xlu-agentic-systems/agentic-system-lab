@@ -67,11 +67,10 @@ sequenceDiagram
     UI->>API: file + session_id
     API->>Extract: read markdown/text/rst/pdf text
     Extract->>Chunk: normalize and split text
-    API->>Embed: embed each new chunk
     API->>DB: short write transaction inserts document + chunks
-    API->>DB: load stored chunks for reindex
-    API->>Embed: re-embed stored chunks after insert
-    API->>DB: update embedding_json for stored chunks
+    DB->>DB: trigger pending index events for new chunks
+    API->>Embed: embed changed chunks from pending events
+    API->>DB: update embedding_json and mark events processed
     API->>Session: set current_document_id and filename
     API-->>UI: UploadResponse with document id, chunk count, context
 ```
@@ -82,8 +81,8 @@ Important details:
 - PDF text extraction uses `pypdf`.
 - Chunk embeddings are computed before the SQLite write transaction starts, so
   the database is not locked while waiting on external embedding calls.
-- After insert, Project 4 recomputes embeddings for stored chunks. This is a
-  deliberately simple full-reindex strategy for the MVP.
+- After insert, SQLite triggers enqueue per-chunk index events. The app
+  processes those events immediately for read-after-write freshness.
 
 ## Document Library Flow
 
@@ -105,7 +104,8 @@ Selecting a document updates only session context. It does not recompute
 embeddings because the stored document chunks did not change.
 
 Deleting a document removes its chunks, clears the current session document if
-that deleted document was selected, and reindexes remaining chunks.
+that deleted document was selected, and records delete events so the freshness
+processor can mark the removed chunks as processed.
 
 ## Retrieval And Answer Flow
 
@@ -173,22 +173,36 @@ structured `OrchestratorDecision`.
 This keeps RAG as a capability path inside an agentic orchestration layer rather
 than making retrieval the only behavior.
 
-## Why Reindex On Insert And Delete
+## Chunking Benchmarks
+
+Project 4 can compare fixed, paragraph, and sentence chunking without network
+calls:
+
+```bash
+python3 -m project4_agentic_project_copilot.app.chunking_benchmark
+```
+
+The benchmark uses deterministic hash embeddings and a fixed corpus. Current
+results are documented in `project4_rag_chunking_freshness.md`.
+
+## Why Event-Driven Freshness
 
 The user-facing requirement is that stored document changes should keep the
-vector store current. The MVP implements this by recomputing embeddings for all
-stored chunks after document insert or delete.
+vector store current. Project 4 now captures `document_chunks` changes in a
+SQLite `document_index_events` table and processes pending events to refresh
+only affected chunks.
 
 Tradeoffs:
 
-- **Simple and inspectable:** every stored chunk is refreshed from persisted
-  chunk text.
-- **Good for a small local demo:** no background worker or vector DB is needed.
-- **Not production efficient:** full reindexing is O(number of chunks) and can
-  get slow as documents grow.
+- **Simple and inspectable:** freshness state is visible in SQLite.
+- **Good for a small local demo:** pending events are processed inline after
+  upload/delete, so no worker is required.
+- **Closer to production:** the same event table can be drained by a background
+  worker later.
+- **Still local:** retrieval remains a full scan over SQLite JSON embeddings.
 
-In production, this would usually become incremental vector index updates plus a
-background repair/reindex job.
+In production, this would usually become transactional CDC plus incremental
+vector index updates and a background repair/reindex job.
 
 ## Safety And Limitations
 
@@ -201,7 +215,7 @@ Current limitations:
   database.
 - Retrieval uses a full scan with cosine similarity.
 - The original uploaded file bytes are not retained.
-- Full reindexing is intentionally simple and can be expensive for large corpora.
+- Inline event processing still runs in the request path for this MVP.
 - Document access is session-context based in the prototype; there is no auth
   middleware.
 

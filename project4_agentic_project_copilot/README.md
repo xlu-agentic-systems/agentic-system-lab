@@ -13,8 +13,12 @@ orchestrator + RAG over files + safe text-to-SQL + confirmed API tool use
 
 - Upload markdown, text, reStructuredText, or PDF documents.
 - Extract text, chunk it, create embeddings, and store chunks in local SQLite.
+- Compare fixed, paragraph, and sentence chunking strategies with an offline
+  retrieval benchmark.
 - View, select, and delete uploaded documents from the document library.
 - Retrieve relevant chunks for file questions and answer with citations.
+- Keep chunk embeddings fresh through SQLite change events instead of full
+  corpus reindexing.
 - Query a local SQLite task database through generated read-only SQL.
 - Block destructive SQL such as `DELETE`, `UPDATE`, `DROP`, `INSERT`, and `ALTER`.
 - Propose project API actions such as `create_task`, `update_task_status`,
@@ -86,13 +90,13 @@ The task schema includes:
 
 The vector store is implemented as SQLite `document_chunks` rows with JSON
 embeddings. This keeps the MVP local and inspectable while preserving the core
-RAG shape.
+RAG shape. Chunk inserts, text updates, and deletes are captured in
+`document_index_events` so the app can refresh only affected chunk embeddings.
 
-Uploads compute embeddings before opening the SQLite write transaction, so the
-database is not locked while waiting on external embedding calls.
-After a document insert or delete, the app reindexes stored document chunks by
-recomputing embeddings from the persisted chunk text. This keeps the local
-vector store consistent with the document library.
+Uploads keep the SQLite write transaction short by inserting extracted chunks
+first, then processing pending index events after commit. This keeps the local
+vector store consistent with the document library while avoiding full-corpus
+reindexing after every change.
 
 ## Safety Model
 
@@ -116,5 +120,6 @@ State-changing actions are never executed on the first model proposal.
 
 ```bash
 pytest project4_agentic_project_copilot/tests -q
+python3 -m project4_agentic_project_copilot.app.chunking_benchmark
 python3 -m project4_agentic_project_copilot.app.evaluation
 ```
