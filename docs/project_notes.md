@@ -2,7 +2,7 @@
 
 ## Current Runtime Model
 
-All four projects call OpenAI models at runtime through `OpenAILlmClient`,
+The LLM-backed projects call OpenAI models at runtime through `OpenAILlmClient`,
 which calls the Responses API and parses Pydantic structured outputs:
 
 - `POST /returns/chat`: a fixed return-chatbot pipeline
@@ -10,6 +10,9 @@ which calls the Responses API and parses Pydantic structured outputs:
 - `POST /evaluations/run`: an out-of-band adaptive evaluation flow
 - `POST /chat` in Project 4: a project copilot that routes across RAG,
   read-only SQL, project API tools, context, and clarification
+- `POST /agent/query` and `POST /agent/tasks` in Project 5: an agentic access
+  layer over deterministic metadata service tools
+- `POST /autonomous-runs` in Project 6: a bounded autonomous evaluation loop
 
 Set `OPENAI_API_KEY` before running the API. The repo includes `.env.example`;
 copy it to `.env`, fill the key, and source it before starting FastAPI:

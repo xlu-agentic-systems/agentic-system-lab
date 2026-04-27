@@ -70,8 +70,8 @@ regression testing before any production prompt file changes.
 
 ## Structured Outputs
 
-All four projects use Pydantic structured outputs through the OpenAI Responses
-API. This gives the backend typed contracts for agent outputs.
+The LLM-backed projects use Pydantic structured outputs through the OpenAI
+Responses API. This gives the backend typed contracts for agent outputs.
 
 Tradeoffs:
 
@@ -84,13 +84,17 @@ Tradeoffs:
 
 ## Tool Safety
 
-Projects 1, 2, and 4 expose fake backend tools. The important design choice is
-that the LLM proposes, while backend code validates and executes.
+Projects 1, 2, 4, 5, and 6 expose backend tools or tool-like host actions. The
+important design choice is that the LLM proposes, while backend code validates
+and executes.
 
 Project 1 validates refunds before execution. Project 2 only auto-executes safe
 support-ticket creation; unsafe payment changes remain proposed. Project 3 does
 not execute production tools at all. Project 4 requires confirmation before
 state-changing task APIs and only executes read-only task search directly.
+Project 5 routes natural language and MCP tool calls through deterministic
+metadata service policy. Project 6 lets the autonomous planner choose evaluation
+repair tools, while the host checks gates and writes only review artifacts.
 
 The tradeoff is extra backend code, but that code is what makes the architecture
 defensible: policy, ownership, amount checks, and approval status are not left to
