@@ -9,6 +9,7 @@ agentic-system-lab/
   project3_adaptive_eval_system/
   project4_agentic_project_copilot/
   project5_agentic_metadata_demo/
+  project6_autonomous_eval_agent/
   docs/
   prompts/
 ```
@@ -23,6 +24,9 @@ agentic-system-lab/
 - `project5_agentic_metadata_demo`: deterministic metadata microservice with an
   optional agentic natural-language layer that uses the service endpoints as
   tools.
+- `project6_autonomous_eval_agent`: bounded autonomous agent loop for adaptive
+  evaluation repair, regression artifacts, benchmark gates, and candidate prompt
+  files.
 
 Shared architecture notes live in `docs/`. Project-specific implementation and
 tests live inside each project folder so PRs can coexist without competing over a
@@ -41,3 +45,5 @@ root-level `app/` package.
   persistence, document library, retrieval, citations, and reindexing.
 - `project4_agentic_project_copilot/docs/architecture.md`: retrieval and
   tool-use copilot architecture.
+- `project6_autonomous_eval_agent/docs/architecture.md`: autonomous evaluation
+  loop architecture.

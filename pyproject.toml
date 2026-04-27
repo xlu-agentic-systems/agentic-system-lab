@@ -32,5 +32,6 @@ testpaths = [
   "project3_adaptive_eval_system/generated_tests",
   "project4_agentic_project_copilot/tests",
   "project5_agentic_metadata_demo/tests",
+  "project6_autonomous_eval_agent/tests",
 ]
 pythonpath = ["."]
