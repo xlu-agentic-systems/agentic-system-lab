@@ -36,7 +36,7 @@ class CopilotDatabase:
                 JOIN pragma_table_info(m.name) p
                 WHERE m.type = 'table'
                   AND m.name NOT LIKE 'sqlite_%'
-                  AND m.name NOT IN ('documents', 'document_chunks')
+                  AND m.name NOT IN ('documents', 'document_chunks', 'document_index_events')
                 ORDER BY m.name, p.cid
                 """
             ).fetchall()
@@ -169,4 +169,36 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   embedding_json TEXT NOT NULL,
   FOREIGN KEY(document_id) REFERENCES documents(document_id)
 );
+
+CREATE TABLE IF NOT EXISTS document_index_events (
+  event_id INTEGER PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  chunk_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processed', 'failed')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  processed_at TEXT
+);
+
+CREATE TRIGGER IF NOT EXISTS document_chunks_insert_index_event
+AFTER INSERT ON document_chunks
+BEGIN
+  INSERT INTO document_index_events(event_type, document_id, chunk_id)
+  VALUES ('chunk_inserted', NEW.document_id, NEW.chunk_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS document_chunks_text_update_index_event
+AFTER UPDATE OF text ON document_chunks
+BEGIN
+  INSERT INTO document_index_events(event_type, document_id, chunk_id)
+  VALUES ('chunk_text_updated', NEW.document_id, NEW.chunk_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS document_chunks_delete_index_event
+AFTER DELETE ON document_chunks
+BEGIN
+  INSERT INTO document_index_events(event_type, document_id, chunk_id)
+  VALUES ('chunk_deleted', OLD.document_id, OLD.chunk_id);
+END;
 """

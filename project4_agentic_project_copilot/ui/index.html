@@ -341,7 +341,7 @@
         const data = await response.json();
         if (data.context) renderContext(data.context);
         addMessage("assistant", data.deleted
-          ? `Deleted ${filename}. Reindexed ${data.reindexed_chunk_count} chunks.`
+          ? `Deleted ${filename}. Refreshed ${data.reindexed_chunk_count} changed chunks.`
           : `${filename} was not found.`);
         await loadDocuments();
       } catch (error) {
@@ -439,7 +439,7 @@
         renderContext(uploadContext);
         addMessage(
           "assistant",
-          `Uploaded ${data.filename} (${data.chunk_count} chunks). It is now the current file. Reindexed ${data.reindexed_chunk_count} chunks.`
+          `Uploaded ${data.filename} (${data.chunk_count} chunks). It is now the current file. Refreshed ${data.reindexed_chunk_count} changed chunks.`
         );
         await loadDocuments();
       } catch (error) {

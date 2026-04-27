@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
 from project4_agentic_project_copilot.app.embeddings import EmbeddingClient, OpenAIEmbeddingClient, cosine_similarity
@@ -11,6 +13,15 @@ from project4_agentic_project_copilot.app.models import DocumentSummary, Retriev
 
 
 SUPPORTED_TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".rst"}
+ChunkingStrategy = Literal["fixed", "paragraph", "sentence"]
+DEFAULT_CHUNKING_STRATEGY: ChunkingStrategy = "fixed"
+
+
+@dataclass(frozen=True)
+class FreshnessResult:
+    processed_event_count: int
+    reindexed_chunk_count: int
+    skipped_event_count: int = 0
 
 
 class DocumentStore:
@@ -21,40 +32,44 @@ class DocumentStore:
         *,
         chunk_size: int = 900,
         chunk_overlap: int = 120,
+        chunking_strategy: ChunkingStrategy = DEFAULT_CHUNKING_STRATEGY,
     ) -> None:
         self.db = db or CopilotDatabase()
         self.embedding_client = embedding_client or OpenAIEmbeddingClient()
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.chunking_strategy = chunking_strategy
 
     async def ingest_bytes(self, *, filename: str, content_type: str, content: bytes) -> UploadResponse:
         text = extract_text(filename, content)
         document_id = str(uuid.uuid4())
-        chunks = chunk_text(text, chunk_size=self.chunk_size, overlap=self.chunk_overlap)
-        embeddings = []
-        for chunk in chunks:
-            embeddings.append(await self.embedding_client.embed(chunk))
+        chunks = chunk_text(
+            text,
+            chunk_size=self.chunk_size,
+            overlap=self.chunk_overlap,
+            strategy=self.chunking_strategy,
+        )
         with self.db.connect() as conn:
             conn.execute(
                 "INSERT INTO documents(document_id, filename, content_type) VALUES (?, ?, ?)",
                 (document_id, filename, content_type or "application/octet-stream"),
             )
-            for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            for index, chunk in enumerate(chunks):
                 chunk_id = f"{document_id}:{index}"
                 conn.execute(
                     """
                     INSERT INTO document_chunks(chunk_id, document_id, chunk_index, text, embedding_json)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    (chunk_id, document_id, index, chunk, json.dumps(embedding)),
+                    (chunk_id, document_id, index, chunk, "[]"),
                 )
             conn.commit()
-        reindexed_count = await self.reindex_embeddings()
+        freshness = await self.process_pending_index_events()
         return UploadResponse(
             document_id=document_id,
             filename=filename,
             chunk_count=len(chunks),
-            reindexed_chunk_count=reindexed_count,
+            reindexed_chunk_count=freshness.reindexed_chunk_count,
         )
 
     def list_documents(self) -> list[DocumentSummary]:
@@ -109,8 +124,8 @@ class DocumentStore:
             conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
             conn.execute("DELETE FROM documents WHERE document_id = ?", (document_id,))
             conn.commit()
-        reindexed_count = await self.reindex_embeddings()
-        return True, reindexed_count
+        freshness = await self.process_pending_index_events()
+        return True, freshness.reindexed_chunk_count
 
     async def reindex_embeddings(self) -> int:
         with self.db.connect() as conn:
@@ -129,6 +144,86 @@ class DocumentStore:
                 conn.executemany("UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?", updates)
                 conn.commit()
         return len(updates)
+
+    async def process_pending_index_events(self, *, limit: int | None = None) -> FreshnessResult:
+        query = """
+            SELECT event_id, event_type, chunk_id
+            FROM document_index_events
+            WHERE status = 'pending'
+            ORDER BY event_id
+        """
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (limit,)
+        with self.db.connect() as conn:
+            events = conn.execute(query, params).fetchall()
+        reindexed_count = 0
+        skipped_count = 0
+        for event in events:
+            try:
+                if event["event_type"] in {"chunk_inserted", "chunk_text_updated"} and event["chunk_id"]:
+                    row = self._get_chunk_for_refresh(event["chunk_id"])
+                    if row is None:
+                        skipped_count += 1
+                    else:
+                        embedding = await self.embedding_client.embed(row["text"])
+                        with self.db.connect() as conn:
+                            conn.execute(
+                                "UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?",
+                                (json.dumps(embedding), event["chunk_id"]),
+                            )
+                            conn.commit()
+                        reindexed_count += 1
+                else:
+                    skipped_count += 1
+                self._mark_index_event_processed(event["event_id"])
+            except Exception as exc:
+                self._mark_index_event_failed(event["event_id"], str(exc))
+                raise
+        return FreshnessResult(
+            processed_event_count=len(events),
+            reindexed_chunk_count=reindexed_count,
+            skipped_event_count=skipped_count,
+        )
+
+    def pending_index_event_count(self) -> int:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM document_index_events WHERE status = 'pending'"
+            ).fetchone()
+        return int(row["count"])
+
+    def _get_chunk_for_refresh(self, chunk_id: str):
+        with self.db.connect() as conn:
+            return conn.execute(
+                "SELECT chunk_id, text FROM document_chunks WHERE chunk_id = ?",
+                (chunk_id,),
+            ).fetchone()
+
+    def _mark_index_event_processed(self, event_id: int) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE document_index_events
+                SET status = 'processed', processed_at = CURRENT_TIMESTAMP, error = NULL
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            )
+            conn.commit()
+
+    def _mark_index_event_failed(self, event_id: int, error: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE document_index_events
+                SET status = 'failed', processed_at = CURRENT_TIMESTAMP, error = ?
+                WHERE event_id = ?
+                """,
+                (error, event_id),
+            )
+            conn.commit()
 
     async def search(self, query: str, *, top_k: int = 4, document_id: str | None = None) -> list[RetrievedChunk]:
         query_embedding = await self.embedding_client.embed(query)
@@ -192,10 +287,30 @@ def extract_text(filename: str, content: bytes) -> str:
     raise ValueError(f"Unsupported file type for {filename}. Use markdown, text, or PDF files.")
 
 
-def chunk_text(text: str, *, chunk_size: int = 900, overlap: int = 120) -> list[str]:
-    normalized = re.sub(r"\n{3,}", "\n\n", text.strip())
+def chunk_text(
+    text: str,
+    *,
+    chunk_size: int = 900,
+    overlap: int = 120,
+    strategy: ChunkingStrategy = DEFAULT_CHUNKING_STRATEGY,
+) -> list[str]:
+    normalized = normalize_text(text)
     if not normalized:
         raise ValueError("Uploaded document did not contain extractable text.")
+    if strategy == "fixed":
+        return _chunk_fixed(normalized, chunk_size=chunk_size, overlap=overlap)
+    if strategy == "paragraph":
+        return _chunk_units(_split_paragraphs(normalized), chunk_size=chunk_size, overlap=overlap)
+    if strategy == "sentence":
+        return _chunk_units(_split_sentences(normalized), chunk_size=chunk_size, overlap=overlap)
+    raise ValueError(f"Unsupported chunking strategy: {strategy}")
+
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", text.strip())
+
+
+def _chunk_fixed(normalized: str, *, chunk_size: int, overlap: int) -> list[str]:
     chunks = []
     start = 0
     while start < len(normalized):
@@ -207,6 +322,51 @@ def chunk_text(text: str, *, chunk_size: int = 900, overlap: int = 120) -> list[
             break
         start = max(end - overlap, start + 1)
     return chunks
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+
+
+def _split_sentences(text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text)
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", normalized) if part.strip()]
+
+
+def _chunk_units(units: list[str], *, chunk_size: int, overlap: int) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for unit in units:
+        if len(unit) > chunk_size:
+            if current:
+                chunks.append(current)
+                current = _overlap_tail(current, overlap)
+            for chunk in _chunk_fixed(unit, chunk_size=chunk_size, overlap=overlap):
+                if current and len(current) + 1 + len(chunk) <= chunk_size:
+                    current = f"{current} {chunk}".strip()
+                else:
+                    if current:
+                        chunks.append(current)
+                    current = chunk
+            continue
+        candidate = f"{current}\n\n{unit}".strip() if current else unit
+        if len(candidate) <= chunk_size:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        tail = _overlap_tail(current, overlap)
+        candidate = f"{tail}\n\n{unit}".strip() if tail else unit
+        current = candidate if len(candidate) <= chunk_size else unit
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _overlap_tail(text: str, overlap: int) -> str:
+    if overlap <= 0 or not text:
+        return ""
+    return text[-overlap:].strip()
 
 
 def short_quote(text: str, max_chars: int = 180) -> str:
