@@ -10,6 +10,7 @@ agentic-system-lab/
   project4_agentic_project_copilot/
   project5_agentic_metadata_demo/
   project6_autonomous_eval_agent/
+  project7_video_provider_mock/
   docs/
   prompts/
 ```
@@ -27,6 +28,9 @@ agentic-system-lab/
 - `project6_autonomous_eval_agent`: bounded autonomous agent loop for adaptive
   evaluation repair, regression artifacts, benchmark gates, and candidate prompt
   files.
+- `project7_video_provider_mock`: local mock video-generation provider with
+  async job state, webhook callbacks, and signed event delivery for backend
+  practice.
 
 Shared architecture notes live in `docs/`. Project-specific implementation and
 tests live inside each project folder so PRs can coexist without competing over a
@@ -47,3 +51,5 @@ root-level `app/` package.
   tool-use copilot architecture.
 - `project6_autonomous_eval_agent/docs/architecture.md`: autonomous evaluation
   loop architecture.
+- `project7_video_provider_mock/README.md`: mock video provider API and webhook
+  workflow.

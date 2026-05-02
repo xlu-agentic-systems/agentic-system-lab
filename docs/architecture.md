@@ -1,7 +1,8 @@
 # Agentic System Architecture
 
-This repo contains six small agentic-system prototypes. They share the same
-runtime conventions but intentionally demonstrate different architecture shapes:
+This repo contains seven small backend and agentic-system prototypes. They share
+the same runtime conventions but intentionally demonstrate different
+architecture shapes:
 
 1. **Project 1:** fixed multi-agent return pipeline
 2. **Project 2:** orchestrator-led support routing
@@ -9,6 +10,7 @@ runtime conventions but intentionally demonstrate different architecture shapes:
 4. **Project 4:** retrieval and tool-use project copilot
 5. **Project 5:** agentic access layer over a metadata microservice
 6. **Project 6:** bounded autonomous adaptive evaluation agent
+7. **Project 7:** local mock video-generation provider
 
 The implementations are deliberately small and interview-focused. The agents are
 logical roles invoked per request, not long-running processes. Backend code owns
@@ -16,7 +18,7 @@ state, tool execution, validation, persistence, and side effects.
 
 ## Shared Runtime Pattern
 
-All six projects use these common boundaries:
+The agentic projects use these common boundaries:
 
 - **LLM boundary:** `OpenAILlmClient` calls the OpenAI Responses API with
   Pydantic structured outputs. Unit tests inject `RuleBasedLlmClient`.
@@ -38,6 +40,9 @@ All six projects use these common boundaries:
 - **Autonomy boundary:** Project 6 lets an agent choose the next evaluation
   repair tool in a loop, but host code still executes tools, checks acceptance
   gates, bounds iterations, and prevents production prompt mutation.
+- **External-provider boundary:** Project 7 is not an agentic workflow; it is a
+  local provider mock that lets another backend practice async job creation,
+  webhook verification, and media URL handling without a real external API.
 
 The `.env` file is not auto-loaded. For local real-LLM runs:
 
