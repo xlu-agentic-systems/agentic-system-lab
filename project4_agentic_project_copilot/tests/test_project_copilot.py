@@ -434,6 +434,138 @@ def test_create_task_requires_confirmation_then_executes(tmp_path: Path) -> None
     assert rows[0]["title"] == "follow up with QA in project 1"
 
 
+def test_create_personal_note_requires_confirmation_then_persists(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    proposed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="notes",
+                message="Save this as a note: Call Sam by Friday about the launch checklist.",
+            )
+        )
+    )
+
+    assert proposed.route == "api_tool"
+    assert proposed.tool_call is not None
+    assert proposed.tool_call.name == "create_note"
+    assert proposed.pending_action is not None
+    assert proposed.tool_result is None
+    assert proposed.context.current_workflow_id is not None
+    workflows = copilot.db.execute_read(
+        "SELECT workflow_type, status FROM productivity_workflows WHERE workflow_id = ?",
+        (proposed.context.current_workflow_id,),
+    )
+    assert workflows == [{"workflow_type": "capture_personal_note", "status": "awaiting_review"}]
+
+    confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="notes",
+                message="Confirm note",
+                confirm_action_id=proposed.pending_action.action_id,
+            )
+        )
+    )
+
+    assert confirmed.tool_result is not None
+    assert confirmed.tool_result.ok is True
+    assert confirmed.context.current_note_id is not None
+    notes = copilot.db.execute_read(
+        "SELECT title, body FROM personal_notes WHERE note_id = ?",
+        (confirmed.context.current_note_id,),
+    )
+    workflows = copilot.db.execute_read(
+        "SELECT status FROM productivity_workflows WHERE workflow_id = ?",
+        (confirmed.context.current_workflow_id,),
+    )
+    steps = copilot.db.execute_read(
+        "SELECT name, status FROM workflow_steps WHERE workflow_id = ? ORDER BY step_index",
+        (confirmed.context.current_workflow_id,),
+    )
+    assert notes[0]["body"] == "Call Sam by Friday about the launch checklist."
+    assert workflows == [{"status": "completed"}]
+    assert steps == [
+        {"name": "proposed_tool_action", "status": "awaiting_review"},
+        {"name": "confirmed_tool_execution", "status": "completed"},
+    ]
+
+
+def test_note_to_followup_task_uses_reviewed_workflow_state(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    note_proposal = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="note-workflow",
+                message="Save this as a note: Review vendor contract before launch.",
+            )
+        )
+    )
+    note_confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="note-workflow",
+                message="Confirm note",
+                confirm_action_id=note_proposal.pending_action.action_id,
+            )
+        )
+    )
+
+    proposed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="note-workflow",
+                message="Turn this note into a follow-up task in project 1",
+            )
+        )
+    )
+
+    assert note_confirmed.context.current_note_id is not None
+    assert proposed.route == "api_tool"
+    assert proposed.tool_call is not None
+    assert proposed.tool_call.name == "create_task"
+    assert proposed.pending_action is not None
+    assert proposed.tool_call.args.note_id == note_confirmed.context.current_note_id
+    workflow = copilot.db.execute_read(
+        """
+        SELECT workflow_type, status, source_note_id
+        FROM productivity_workflows
+        WHERE workflow_id = ?
+        """,
+        (proposed.context.current_workflow_id,),
+    )
+    assert workflow == [
+        {
+            "workflow_type": "document_or_note_to_task",
+            "status": "awaiting_review",
+            "source_note_id": note_confirmed.context.current_note_id,
+        }
+    ]
+
+    confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="note-workflow",
+                message="Confirm task",
+                confirm_action_id=proposed.pending_action.action_id,
+            )
+        )
+    )
+
+    assert confirmed.tool_result is not None
+    assert confirmed.tool_result.ok is True
+    workflow = copilot.db.execute_read(
+        "SELECT status FROM productivity_workflows WHERE workflow_id = ?",
+        (confirmed.context.current_workflow_id,),
+    )
+    task = copilot.db.execute_read(
+        "SELECT title, description FROM tasks WHERE task_id = ?",
+        (confirmed.context.current_task_id,),
+    )
+    assert workflow == [{"status": "completed"}]
+    assert task[0]["title"] == f"Follow up on note {note_confirmed.context.current_note_id}"
+    assert f"Source note: {note_confirmed.context.current_note_id}" in task[0]["description"]
+
+
 def test_observability_logs_pending_and_confirmed_tool_execution(tmp_path: Path, monkeypatch) -> None:
     events = []
 

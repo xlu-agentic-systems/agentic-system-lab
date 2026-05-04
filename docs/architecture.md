@@ -422,9 +422,10 @@ evaluation run.
 
 ## Project 4: Agentic Project Copilot
 
-**Purpose:** demonstrate a retrieval and tool-use copilot that can work across
-uploaded files, local structured task data, project API tools, session context,
-and clarification.
+**Purpose:** demonstrate a local-first productivity workflow prototype that can
+work across uploaded personal files and notes, local structured task data,
+reviewable productivity tools, persisted workflow state, session context, and
+clarification.
 
 **Entry points:**
 
@@ -448,12 +449,13 @@ and clarification.
 The main pattern is:
 
 ```text
-Copilot Orchestrator -> files/RAG | SQL/data | API tool | context | clarification
+Copilot Orchestrator -> files and notes/RAG | SQL/data | productivity tools | workflow state | context | clarification
 ```
 
 RAG is one capability path, not the whole system. The copilot also inspects a
-local SQLite schema, generates read-only SQL, validates it before execution, and
-requires confirmation before state-changing project API tools run.
+local SQLite schema, generates read-only SQL, validates it before execution,
+captures personal notes, persists reviewable workflow state, and requires
+confirmation before state-changing productivity tools run.
 
 ```mermaid
 flowchart TD
@@ -486,7 +488,8 @@ flowchart TD
 ```
 
 The file RAG path persists uploaded document metadata, extracted chunks, and
-JSON embeddings in local SQLite. The UI document library can list, select, and
+JSON embeddings in local SQLite. Personal notes, workflow runs, and workflow
+steps are also stored in SQLite. The UI document library can list, select, and
 delete stored documents. SQLite triggers write `document_index_events`, and the
 app processes pending events to refresh only changed chunk embeddings. Retrieval
 still scans local SQLite JSON embeddings, which keeps the MVP inspectable.
@@ -497,9 +500,12 @@ still scans local SQLite JSON embeddings, which keeps the MVP inspectable.
   orchestrator runs
 - file answers must cite retrieved chunks
 - generated SQL must be read-only `SELECT` or CTE SQL before SQLite execution
-- state-changing project API tools create pending actions first
+- state-changing productivity tools create pending actions and workflow rows
+  first
 - confirmation is required before `create_task`, `update_task_status`,
-  `assign_task`, or `add_comment` executes
+  `assign_task`, `add_comment`, or `create_note` executes
+- note-to-task conversion persists `productivity_workflows` and
+  `workflow_steps` before task creation
 - document deletion clears selected-session document context when needed
 
 See `project4_agentic_project_copilot/docs/architecture.md` for the detailed

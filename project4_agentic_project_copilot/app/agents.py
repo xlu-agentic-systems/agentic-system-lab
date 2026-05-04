@@ -18,11 +18,12 @@ class CopilotOrchestrator:
         return await self.llm_client.parse(
             task_name="copilot_orchestrator",
             system_prompt=(
-                "You route a project copilot request to one path: context, file_retrieval, "
-                "sql_query, api_tool, or clarify. Use file_retrieval for uploaded document "
-                "questions, sql_query for read-only structured database questions, api_tool "
-                "for task actions, context for session-state questions, and clarify when the "
-                "request is ambiguous. Return only OrchestratorDecision."
+                "You route a personal productivity copilot request to one path: context, "
+                "file_retrieval, sql_query, api_tool, or clarify. Use file_retrieval for "
+                "uploaded file or note-content questions, sql_query for read-only structured "
+                "database questions, api_tool for task or personal-note actions, context for "
+                "session/workflow-state questions, and clarify when the request is ambiguous. "
+                "Return only OrchestratorDecision."
             ),
             user_payload={"message": message, "context": context.model_dump(mode="json")},
             response_model=OrchestratorDecision,
@@ -58,9 +59,9 @@ class ToolAgent:
         return await self.llm_client.parse(
             task_name="tool_agent",
             system_prompt=(
-                "Propose one project task API call. State-changing tools require confirmation. "
-                "Use create_task, update_task_status, assign_task, add_comment, or search_tasks. "
-                "Return only ToolCall."
+                "Propose one productivity tool call. State-changing tools require confirmation. "
+                "Use create_task, update_task_status, assign_task, add_comment, search_tasks, "
+                "create_note, or search_notes. Return only ToolCall."
             ),
             user_payload={
                 "message": message,

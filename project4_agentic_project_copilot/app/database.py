@@ -154,6 +154,43 @@ CREATE TABLE IF NOT EXISTS status_history (
   FOREIGN KEY(changed_by) REFERENCES users(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS personal_notes (
+  note_id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  source_document_id TEXT,
+  source_filename TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(source_document_id) REFERENCES documents(document_id)
+);
+
+CREATE TABLE IF NOT EXISTS productivity_workflows (
+  workflow_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  workflow_type TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('awaiting_review', 'completed', 'failed')),
+  pending_action_id TEXT,
+  source_document_id TEXT,
+  source_note_id INTEGER,
+  summary TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(source_document_id) REFERENCES documents(document_id),
+  FOREIGN KEY(source_note_id) REFERENCES personal_notes(note_id)
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  step_id INTEGER PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  step_index INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  output_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(workflow_id) REFERENCES productivity_workflows(workflow_id)
+);
+
 CREATE TABLE IF NOT EXISTS documents (
   document_id TEXT PRIMARY KEY,
   filename TEXT NOT NULL,

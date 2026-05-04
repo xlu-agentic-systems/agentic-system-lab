@@ -7,7 +7,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 Route = Literal["context", "file_retrieval", "sql_query", "api_tool", "clarify"]
-ToolName = Literal["create_task", "update_task_status", "assign_task", "add_comment", "search_tasks"]
+ToolName = Literal[
+    "create_task",
+    "update_task_status",
+    "assign_task",
+    "add_comment",
+    "search_tasks",
+    "create_note",
+    "search_notes",
+]
 TaskStatus = Literal["open", "in_progress", "blocked", "done"]
 
 
@@ -24,6 +32,10 @@ class ToolArgs(BaseModel):
     changed_by: int | None = None
     body: str | None = None
     query: str | None = None
+    note_id: int | None = None
+    source_document_id: str | None = None
+    source_filename: str | None = None
+    workflow_id: str | None = None
 
     def clean(self) -> dict:
         return self.model_dump(exclude_none=True)
@@ -48,6 +60,8 @@ class SessionContext(BaseModel):
     current_task_id: int | None = None
     current_document_id: str | None = None
     current_document_filename: str | None = None
+    current_note_id: int | None = None
+    current_workflow_id: str | None = None
     pending_actions: dict[str, "ToolCall"] = Field(default_factory=dict)
     history: list["ChatTurn"] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -112,6 +126,7 @@ class DecisionLog(BaseModel):
     selected_data_source: str | None = None
     generated_sql: str | None = None
     tool_name: ToolName | None = None
+    workflow_id: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -176,6 +191,9 @@ class EvaluationCase(BaseModel):
     expected_sql_contains: str | None = None
     expected_response_contains: str | None = None
     confirm_action: bool = False
+    setup_note_title: str | None = None
+    setup_note_body: str | None = None
+    expected_workflow_status: Literal["awaiting_review", "completed", "failed"] | None = None
 
 
 class EvaluationResult(BaseModel):
@@ -184,6 +202,18 @@ class EvaluationResult(BaseModel):
     route: Route
     expected_route: Route
     summary: str
+
+
+class GoalHarnessCheck(BaseModel):
+    name: str
+    passed: bool
+    summary: str
+
+
+class GoalHarnessRun(BaseModel):
+    total: int
+    passed: int
+    checks: list[GoalHarnessCheck]
 
 
 SessionContext.model_rebuild()

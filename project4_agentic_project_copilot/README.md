@@ -1,12 +1,18 @@
-# Project 4: Agentic Project Copilot
+# Project 4: Local-First AI Productivity Workflows
 
-Project 4 is a new use case in this repo: an agentic project copilot that can
-talk to files, structured task data, and project API tools.
+Project 4 is a local-first productivity workflow prototype. It can talk to
+uploaded files and notes, structured task data, and reviewable productivity
+tools while keeping documents, notes, workflow state, sessions, traces, and eval
+artifacts in local files or SQLite.
+
+Local-first means the workflow data and artifacts are local and inspectable. The
+live app still uses OpenAI for LLM calls and embeddings unless deterministic
+test clients or another local provider are injected.
 
 It demonstrates a different pattern from the e-commerce support projects:
 
 ```text
-orchestrator + RAG over files + safe text-to-SQL + confirmed API tool use
+orchestrator + RAG over files/notes + safe text-to-SQL + reviewed tool use
 ```
 
 ## Capabilities
@@ -19,15 +25,21 @@ orchestrator + RAG over files + safe text-to-SQL + confirmed API tool use
 - Retrieve relevant chunks for file questions and answer with citations.
 - Keep chunk embeddings fresh through SQLite change events instead of full
   corpus reindexing.
+- Capture personal notes through a review-gated `create_note` tool.
+- Search persisted personal notes through a read-only `search_notes` tool.
+- Convert current file or note context into follow-up tasks with persisted
+  workflow state.
 - Query a local SQLite task database through generated read-only SQL.
 - Block destructive SQL such as `DELETE`, `UPDATE`, `DROP`, `INSERT`, and `ALTER`.
 - Propose project API actions such as `create_task`, `update_task_status`,
-  `assign_task`, and `add_comment`.
-- Require confirmation before any state-changing API action executes.
+  `assign_task`, `add_comment`, and `create_note`.
+- Require confirmation before any state-changing productivity action executes.
 - Track session context: current project, current task, current document,
-  conversation history, and pending actions.
+  current note, current workflow, conversation history, and pending actions.
+- Persist workflow runs and steps for reviewable actions in SQLite.
 - Log orchestration decisions and tool usage to JSONL traces.
-- Run an evaluation harness for routing, retrieval, SQL safety, and tool behavior.
+- Run evaluation harnesses for routing, retrieval, tool selection, output
+  quality, safety, review gates, workflow state, and regressions.
 
 ## Run
 
@@ -85,6 +97,9 @@ The task schema includes:
 - `users`
 - `comments`
 - `status_history`
+- `personal_notes`
+- `productivity_workflows`
+- `workflow_steps`
 - `documents`
 - `document_chunks`
 
@@ -115,6 +130,31 @@ user request -> tool agent proposes action -> assistant shows preview -> user co
 ```
 
 State-changing actions are never executed on the first model proposal.
+The pending action is also represented as a `productivity_workflows` row with
+`awaiting_review` status. Confirmation executes the tool and marks the workflow
+`completed` or `failed`, with `workflow_steps` preserving the proposed and
+confirmed execution records.
+
+## Eval Harnesses
+
+The standard eval command runs JSONL regression cases for routing, RAG,
+read-only SQL, destructive-SQL refusal, tool selection, review gates, note
+capture, and note-to-task workflow conversion:
+
+```bash
+python3 -m project4_agentic_project_copilot.app.evaluation
+```
+
+The same module exposes `run_goal_harness()`, which checks the specific product
+claim end to end:
+
+- RAG over an uploaded personal notes document returns citations.
+- Uploaded documents persist locally.
+- Personal note creation is blocked behind human review.
+- Confirmed note creation writes durable note state.
+- Note-to-task conversion creates persisted workflow state before execution.
+- Human confirmation completes the workflow and creates the task.
+- The regression eval suite still passes.
 
 ## Tests
 

@@ -108,6 +108,26 @@ def _decision(payload: dict) -> dict:
         return {"route": "context", "reasoning": "Confirmation is handled by the service layer."}
     if any(term in text for term in ("delete from", "drop table", "insert into", "update tasks")):
         return {"route": "sql_query", "reasoning": "The user is asking for database SQL, so the SQL safety layer must inspect it."}
+    if any(term in text for term in ("search notes", "find notes")):
+        return {
+            "route": "api_tool",
+            "reasoning": "The user wants to search personal notes through the read-only productivity API.",
+            "tool_name": "search_notes",
+        }
+    if any(term in text for term in ("save this as a note", "create note", "capture note", "personal note")):
+        return {
+            "route": "api_tool",
+            "reasoning": "The user wants to capture a personal note, which is a reviewable write.",
+            "tool_name": "create_note",
+        }
+    if ("follow-up task" in text or "follow up task" in text or "turn this note" in text or "turn this document" in text) and any(
+        term in text for term in ("note", "document", "file", "follow")
+    ):
+        return {
+            "route": "api_tool",
+            "reasoning": "The user wants to convert personal context into a task, which is a reviewable workflow.",
+            "tool_name": "create_task",
+        }
     if any(term in text for term in ("search tasks", "find tasks")):
         return {
             "route": "api_tool",
@@ -136,7 +156,7 @@ def _decision(payload: dict) -> dict:
             "reasoning": "The user wants to update task status, which changes state.",
             "tool_name": "update_task_status",
         }
-    if any(term in text for term in ("comment", "note")):
+    if "comment" in text or ("note" in text and "task" in text):
         return {
             "route": "api_tool",
             "reasoning": "The user wants to add a comment, which changes state.",
@@ -185,10 +205,22 @@ def _tool_call(payload: dict) -> dict:
     tool_name = payload.get("tool_name") or "search_tasks"
     if tool_name == "create_task":
         project_id = _number_after(text, "project") or context.get("current_project_id") or 1
-        title = _title_after(message, "create task") or _title_after(message, "add task") or "New task"
+        title = (
+            _title_after(message, "create task")
+            or _title_after(message, "add task")
+            or _followup_task_title(message, context)
+            or "New task"
+        )
         return {
             "name": "create_task",
-            "args": {"project_id": project_id, "title": title, "description": ""},
+            "args": {
+                "project_id": project_id,
+                "title": title,
+                "description": _task_description(message, context),
+                "note_id": context.get("current_note_id"),
+                "source_document_id": context.get("current_document_id"),
+                "source_filename": context.get("current_document_filename"),
+            },
             "requires_confirmation": True,
             "reason": "Creating a task changes the project database.",
         }
@@ -218,6 +250,26 @@ def _tool_call(payload: dict) -> dict:
             "args": {"task_id": task_id, "user_id": 1, "body": body},
             "requires_confirmation": True,
             "reason": "Adding a comment changes task records.",
+        }
+    if tool_name == "create_note":
+        note = _note_parts(message, context)
+        return {
+            "name": "create_note",
+            "args": {
+                "title": note["title"],
+                "body": note["body"],
+                "source_document_id": context.get("current_document_id"),
+                "source_filename": context.get("current_document_filename"),
+            },
+            "requires_confirmation": True,
+            "reason": "Creating a personal note writes durable productivity memory.",
+        }
+    if tool_name == "search_notes":
+        return {
+            "name": "search_notes",
+            "args": {"query": _search_query(message)},
+            "requires_confirmation": False,
+            "reason": "Searching personal notes is read-only.",
         }
     return {
         "name": "search_tasks",
@@ -249,6 +301,47 @@ def _title_after(message: str, marker: str) -> str | None:
         return None
     title = message[index + len(marker) :].strip(" :-'\"")
     return title or None
+
+
+def _note_parts(message: str, context: dict) -> dict[str, str]:
+    body = (
+        _title_after(message, "save this as a note")
+        or _title_after(message, "create note")
+        or _title_after(message, "capture note")
+        or message
+    )
+    if body.lower() in {"from this document", "from this file"} and context.get("current_document_filename"):
+        body = f"Note captured from {context['current_document_filename']}."
+    cleaned = body.strip()
+    words = cleaned.split()
+    title = " ".join(words[:8]).strip(" .") or "Personal note"
+    return {"title": title, "body": cleaned or title}
+
+
+def _followup_task_title(message: str, context: dict) -> str | None:
+    text = message.lower()
+    if "turn this note" in text and context.get("current_note_id"):
+        return f"Follow up on note {context['current_note_id']}"
+    if "turn this document" in text or "turn this file" in text:
+        if context.get("current_document_filename"):
+            return f"Follow up on {context['current_document_filename']}"
+    explicit = _title_after(message, "follow-up task") or _title_after(message, "follow up task")
+    if explicit:
+        return explicit
+    if context.get("current_note_id"):
+        return f"Follow up on note {context['current_note_id']}"
+    if context.get("current_document_filename"):
+        return f"Follow up on {context['current_document_filename']}"
+    return None
+
+
+def _task_description(message: str, context: dict) -> str:
+    parts = [message]
+    if context.get("current_note_id"):
+        parts.append(f"Source note: {context['current_note_id']}")
+    if context.get("current_document_filename"):
+        parts.append(f"Source document: {context['current_document_filename']}")
+    return " | ".join(parts)
 
 
 def _search_query(message: str) -> str:

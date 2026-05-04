@@ -6,7 +6,7 @@ from project4_agentic_project_copilot.app.database import CopilotDatabase
 from project4_agentic_project_copilot.app.models import ToolArgs, ToolCall, ToolResult
 
 
-WRITE_TOOLS = {"create_task", "update_task_status", "assign_task", "add_comment"}
+WRITE_TOOLS = {"create_task", "update_task_status", "assign_task", "add_comment", "create_note"}
 
 
 class ProjectToolService:
@@ -23,6 +23,10 @@ class ProjectToolService:
             return f"Assign task {args.get('task_id')} to user {args.get('user_id')}."
         if tool_call.name == "add_comment":
             return f"Add a comment to task {args.get('task_id')}: {args.get('body')}"
+        if tool_call.name == "create_note":
+            return f"Create personal note '{args.get('title')}'."
+        if tool_call.name == "search_notes":
+            return f"Search personal notes for {args.get('query')!r}."
         return f"Search tasks for {args.get('query')!r}."
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
@@ -38,6 +42,10 @@ class ProjectToolService:
                 return self._add_comment(args)
             if tool_call.name == "search_tasks":
                 return self._search_tasks(args)
+            if tool_call.name == "create_note":
+                return self._create_note(args)
+            if tool_call.name == "search_notes":
+                return self._search_notes(args)
         except Exception as exc:
             return ToolResult(name=tool_call.name, ok=False, error=str(exc))
         return ToolResult(name=tool_call.name, ok=False, error=f"Unsupported tool: {tool_call.name}")
@@ -120,6 +128,44 @@ class ProjectToolService:
             (f"%{query}%", f"%{query}%", f"%{query}%"),
         )
         return ToolResult(name="search_tasks", ok=True, result=rows)
+
+    def _create_note(self, args: dict[str, Any]) -> ToolResult:
+        title = _required_str(args, "title")
+        body = _required_str(args, "body")
+        note_id = self.db.execute_write(
+            """
+            INSERT INTO personal_notes(title, body, source_document_id, source_filename)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                title,
+                body,
+                args.get("source_document_id"),
+                args.get("source_filename"),
+            ),
+        )
+        return ToolResult(
+            name="create_note",
+            ok=True,
+            result={
+                "note_id": note_id,
+                "title": title,
+                "source_document_id": args.get("source_document_id"),
+            },
+        )
+
+    def _search_notes(self, args: dict[str, Any]) -> ToolResult:
+        query = str(args.get("query") or "").lower()
+        rows = self.db.execute_read(
+            """
+            SELECT note_id, title, body, source_filename, created_at
+            FROM personal_notes
+            WHERE lower(title) LIKE ? OR lower(body) LIKE ? OR lower(source_filename) LIKE ?
+            ORDER BY note_id
+            """,
+            (f"%{query}%", f"%{query}%", f"%{query}%"),
+        )
+        return ToolResult(name="search_notes", ok=True, result=rows)
 
 
 def _required_int(args: dict[str, Any], key: str) -> int:

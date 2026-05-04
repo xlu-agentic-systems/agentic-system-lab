@@ -1,8 +1,9 @@
 # Agentic Project Copilot Architecture
 
-Project 4 is an orchestrated retrieval and tool-use copilot. It is not just a
-RAG app: RAG is one capability path among files, SQL, project APIs, session
-context, and clarification.
+Project 4 is an orchestrated local-first productivity workflow prototype. It is
+not just a RAG app: RAG is one capability path among uploaded files and notes,
+SQL, productivity tools, persisted workflow state, session context, and
+clarification.
 
 ```mermaid
 flowchart TD
@@ -13,8 +14,10 @@ flowchart TD
     Orchestrator["CopilotOrchestrator\nroute decision"]
     Files["File RAG path\nextract + chunk + embed + retrieve"]
     SQL["SQL path\nschema -> SELECT -> validation -> SQLite"]
-    Tools["API tool path\npropose -> confirm -> execute"]
-    Context["Context path\ncurrent project/task/document"]
+    Tools["Tool path\npropose -> workflow -> confirm -> execute"]
+    Workflows["SQLite productivity_workflows\nawaiting_review / completed / failed"]
+    Notes["SQLite personal_notes"]
+    Context["Context path\ncurrent project/task/document/note/workflow"]
     Clarify["Clarification path"]
     Trace["JsonlTraceStore\ndecision audit"]
     Response["ChatResponse\ncitations / SQL / tool results"]
@@ -25,6 +28,8 @@ flowchart TD
     Orchestrator --> Files
     Orchestrator --> SQL
     Orchestrator --> Tools
+    Tools --> Workflows
+    Tools --> Notes
     Orchestrator --> Context
     Orchestrator --> Clarify
     Files --> Response
@@ -43,6 +48,9 @@ Project 4 keeps everything local for the MVP:
 
 - SQLite task database for structured data.
 - SQLite document tables for vector chunks.
+- SQLite `personal_notes` for durable captured notes.
+- SQLite `productivity_workflows` and `workflow_steps` for reviewable workflow
+  state.
 - JSON session file for current context and pending confirmations.
 - JSONL trace file for orchestration decisions.
 
@@ -62,6 +70,16 @@ chat-visible upload confirmation. If the previous turn asked for a file before
 upload, short follow-ups such as "how about now" are treated as references to
 the newly selected document.
 
+Personal notes are created through the same tool boundary as project actions.
+The model proposes `create_note`, the backend records a pending workflow with
+`awaiting_review` status, and only an explicit confirmation writes the note row.
+Read-only note search uses `search_notes` and can execute without confirmation.
+
+When a current note or current document is converted into a follow-up task, the
+pending `create_task` proposal is stored in `productivity_workflows` before any
+task row is created. Confirmation executes the tool and appends a
+`workflow_steps` record with the final result.
+
 Embeddings are generated before the SQLite write transaction starts. The
 transaction only inserts the document and chunks, which avoids holding a write
 lock while waiting on external embedding calls.
@@ -75,7 +93,8 @@ marked processed after the chunk is gone.
 
 In production, the same logical split would map to:
 
-- Postgres or another transactional DB for tasks and comments.
+- Postgres or another transactional DB for tasks, comments, notes, and
+  workflow state.
 - A vector store for document chunks.
 - Redis or another session store for current context and pending actions.
 - Durable trace storage for observability and evaluation.
@@ -91,21 +110,37 @@ The API tool path requires confirmation for every state-changing action:
 - `update_task_status`
 - `assign_task`
 - `add_comment`
+- `create_note`
 
-Only `search_tasks` is read-only and can execute immediately.
+Only `search_tasks` and `search_notes` are read-only and can execute
+immediately.
 
 The live OpenAI structured-output schemas avoid unbounded object fields for
 agent-produced tool arguments. This keeps function-like tool proposals explicit:
 the model can fill known fields such as `project_id`, `task_id`, `status`,
-`title`, `body`, or `query`, and backend validators still make the final
-execution decision.
+`title`, `body`, `query`, `note_id`, or `source_document_id`, and backend
+validators still make the final execution decision.
+
+## Evaluation Harness
+
+`project4_agentic_project_copilot.app.evaluation` now has two layers:
+
+- JSONL regression cases for route selection, RAG, SQL safety, tool selection,
+  review gates, note capture, and note-to-task conversion.
+- `run_goal_harness()`, an end-to-end acceptance harness for the claim that
+  Project 4 supports local-first AI productivity workflows for personal files
+  and notes.
+
+The goal harness checks uploaded-document RAG with citations, local persistence,
+human review before note/task writes, durable workflow state before execution,
+workflow completion after confirmation, and regression-suite health.
 
 ## Pattern
 
 This project adds a new pattern to the repo:
 
 ```text
-Retrieval and tool-use copilot architecture
+Local-first productivity workflow architecture
 ```
 
 It still uses the Project 2 orchestrator idea, but routes by capability rather
