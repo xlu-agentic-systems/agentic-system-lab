@@ -84,9 +84,10 @@ Tradeoffs:
 
 ## Tool Safety
 
-Projects 1, 2, 4, 5, and 6 expose backend tools or tool-like host actions. The
-important design choice is that the LLM proposes, while backend code validates
-and executes.
+Projects 1, 2, 4, 5, and 6 expose backend tools or tool-like host actions.
+Project 7 exposes provider-shaped HTTP operations for integration practice. The
+important design choice is that models and clients propose intent, while backend
+code validates and executes allowed operations.
 
 Project 1 validates refunds before execution. Project 2 only auto-executes safe
 support-ticket creation; unsafe payment changes remain proposed. Project 3 does
@@ -95,6 +96,8 @@ state-changing task APIs and only executes read-only task search directly.
 Project 5 routes natural language and MCP tool calls through deterministic
 metadata service policy. Project 6 lets the autonomous planner choose evaluation
 repair tools, while the host checks gates and writes only review artifacts.
+Project 7 signs webhook deliveries and gates protected endpoints with a mock API
+key, but it is local development infrastructure rather than a public service.
 
 The tradeoff is extra backend code, but that code is what makes the architecture
 defensible: policy, ownership, amount checks, and approval status are not left to
@@ -138,6 +141,10 @@ The repo intentionally does not include:
 - automatic prompt deployment
 - real payment/refund integrations
 - a dedicated LLM final aggregator for Project 2
+- production auth or tenant isolation for Project 5
+- durable background queues for Project 6 autonomous runs
+- durable provider storage, retry queues, or public-network hardening for
+  Project 7
 
 Those omissions keep the prototypes focused on architecture patterns rather than
 full product infrastructure.
@@ -154,12 +161,52 @@ orchestrator with capability paths:
 - session context for current project/task/document
 
 The tradeoff is a broader safety surface. Retrieval needs citations and source
-grounding; document deletion needs session-context cleanup and vector reindexing;
+grounding; document deletion needs session-context cleanup and index freshness;
 SQL needs read-only validation; API actions need confirmation before writes.
 This is more complex than a pure RAG app, but it better matches a real project
 copilot that must work across files, data, and actions.
 
-Project 4 currently uses SQLite rows with JSON embeddings and a full embedding
-reindex after document insert/delete. That is intentionally simple for a local
-prototype. A production version would usually use incremental vector index
-updates and background reindex/repair jobs.
+Project 4 currently uses SQLite rows with JSON embeddings, SQLite triggers, and
+`document_index_events` to refresh changed chunk embeddings after document
+insert/update/delete. That is still intentionally local and inspectable. A
+production version would usually use transactional CDC, a dedicated vector
+index, and background repair jobs.
+
+## Metadata Service Plus Agentic Access
+
+Project 5 shows a modernization pattern: keep the deterministic service and add
+agentic access beside it. The REST API, SQLAlchemy models, SQLite database, and
+policy checks remain the source of truth. Natural-language queries, structured
+agent tasks, and MCP tool calls all go through the same `MetadataTools` facade
+and the same metadata REST API.
+
+The benefit is that existing services can keep stable REST integrations while
+humans or agents get a more flexible access path. The cost is duplicated product
+surface: direct REST, `/agent/query`, `/agent/tasks`, and MCP all need tests and
+documentation. The architecture only stays safe if authorization remains in
+deterministic service code rather than model prompts.
+
+## Bounded Autonomy
+
+Project 6 is the repo's autonomous-loop example. It is deliberately autonomous
+over review artifacts, not production behavior. The planner chooses the next
+tool, but the host executes only an allowlisted set, checks acceptance gates, and
+stops at `max_iterations`.
+
+The benefit is a realistic loop for evaluation repair: the system can decide
+whether to evaluate traces, run a benchmark, generate candidate prompts, or
+finish. The cost is that progress depends on well-designed gates. Weak gates
+would let the agent finish too early; overly strict gates can waste iterations.
+
+## Provider Mock As Integration Infrastructure
+
+Project 7 is not another agent architecture. It is a local external-provider
+mock used to practice backend integration behavior: async job state, polling,
+asset upload, media URLs, signed callbacks, registered webhook endpoints, secret
+rotation, and delivery history.
+
+The benefit is cheaper and more deterministic integration practice. The cost is
+that a local mock can create false confidence if treated like production
+infrastructure. The README calls out that state is in memory, webhook delivery
+has no durable retry queue, and the default `dev-key` should not be exposed on a
+public network.

@@ -10,7 +10,7 @@ from typing import Any
 
 
 SAFE_VALUE = re.compile(r"^[A-Za-z0-9_.:/@-]{1,160}$")
-DEFAULT_ALLOWED_PROJECTS = frozenset({"project1", "project2", "project3", "project4"})
+DEFAULT_ALLOWED_PROJECTS = frozenset({"project1", "project2", "project3", "project4", "project6"})
 
 
 class LokiToolError(ValueError):

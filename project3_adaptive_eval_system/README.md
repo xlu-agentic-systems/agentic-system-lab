@@ -37,13 +37,13 @@ cp .env.example .env
 set -a
 source .env
 set +a
-python -m project3_adaptive_eval_system.app.cli evaluate
+python3 -m project3_adaptive_eval_system.app.cli evaluate
 ```
 
 To run the adaptive feedback loop over Project 1 traces:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli project1-feedback \
+python3 -m project3_adaptive_eval_system.app.cli project1-feedback \
   --trace-path project1_multi_agent_return_bot/data/conversation_traces.jsonl
 ```
 
@@ -51,7 +51,7 @@ If local Loki is running and Project 1 was started with
 `AGENTIC_LAB_LOKI_URL=http://localhost:3100`, include observability context:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli project1-feedback \
+python3 -m project3_adaptive_eval_system.app.cli project1-feedback \
   --trace-path project1_multi_agent_return_bot/data/conversation_traces.jsonl \
   --include-loki-context
 ```
@@ -68,14 +68,14 @@ Project 1 adaptive feedback path.
 To measure evaluation depth against labeled cases:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli benchmark
+python3 -m project3_adaptive_eval_system.app.cli benchmark
 ```
 
 This command uses the default runtime LLM client, so `OPENAI_API_KEY` must be
 set. For a local deterministic dry run without network calls:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli benchmark --use-rule-based
+python3 -m project3_adaptive_eval_system.app.cli benchmark --use-rule-based
 ```
 
 Unit tests use the deterministic rule-based client to avoid network calls.
@@ -88,7 +88,7 @@ After a patch is approved, render it into a reviewable candidate prompt without
 mutating production prompts:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli promote-candidate PATCH_ID
+python3 -m project3_adaptive_eval_system.app.cli promote-candidate PATCH_ID
 ```
 
 Candidate prompts are written under `prompt_candidates/` and must still be
