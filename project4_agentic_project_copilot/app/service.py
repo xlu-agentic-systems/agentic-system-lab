@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import uuid
+import json
 import logging
+import uuid
 from pathlib import Path
 
 from agentic_system_lab.observability import log_agent_event
@@ -292,6 +293,12 @@ class ProjectCopilotService:
                 preview=self.tools.preview(tool_call),
             )
             context.pending_actions[action_id] = tool_call
+            workflow_id = self._create_workflow_state(
+                context=context,
+                action_id=action_id,
+                tool_call=tool_call,
+                preview=pending.preview,
+            )
             log_agent_event(
                 logger,
                 event="tool_execution",
@@ -300,7 +307,7 @@ class ProjectCopilotService:
                 session_id=request.session_id,
                 tool_name=tool_call.name,
                 status="requires_confirmation",
-                attributes={"requires_confirmation": tool_call.requires_confirmation},
+                attributes={"requires_confirmation": tool_call.requires_confirmation, "workflow_id": workflow_id},
             )
             return self._response(
                 request,
@@ -309,7 +316,13 @@ class ProjectCopilotService:
                 route="api_tool",
                 tool_call=tool_call,
                 pending_action=pending,
-                log=DecisionLog(route="api_tool", reasoning=decision.reasoning, selected_data_source="project_api", tool_name=tool_call.name),
+                log=DecisionLog(
+                    route="api_tool",
+                    reasoning=decision.reasoning,
+                    selected_data_source="project_api",
+                    tool_name=tool_call.name,
+                    workflow_id=workflow_id,
+                ),
             )
         result = self.tools.execute(tool_call)
         log_agent_event(
@@ -357,6 +370,7 @@ class ProjectCopilotService:
                 log=DecisionLog(route="api_tool", reasoning="User attempted to confirm a missing pending action.", selected_data_source="project_api"),
             )
         result = self.tools.execute(tool_call)
+        workflow_id = self._finish_workflow_state(context, action_id, result)
         log_agent_event(
             logger,
             event="tool_execution",
@@ -365,7 +379,12 @@ class ProjectCopilotService:
             session_id=request.session_id,
             tool_name=tool_call.name,
             status="executed" if result.ok else "failed",
-            attributes={"ok": result.ok, "error": result.error, "requires_confirmation": tool_call.requires_confirmation},
+            attributes={
+                "ok": result.ok,
+                "error": result.error,
+                "requires_confirmation": tool_call.requires_confirmation,
+                "workflow_id": workflow_id,
+            },
         )
         self._update_context_from_tool(context, tool_call, result)
         return self._response(
@@ -375,14 +394,22 @@ class ProjectCopilotService:
             route="api_tool",
             tool_call=tool_call,
             tool_result=result,
-            log=DecisionLog(route="api_tool", reasoning="User confirmed a pending state-changing API action.", selected_data_source="project_api", tool_name=tool_call.name),
+            log=DecisionLog(
+                route="api_tool",
+                reasoning="User confirmed a pending state-changing API action.",
+                selected_data_source="project_api",
+                tool_name=tool_call.name,
+                workflow_id=workflow_id,
+            ),
         )
 
     def _answer_from_context(self, request: ChatRequest, context: SessionContext, reasoning: str) -> ChatResponse:
         response = (
             f"Current project: {context.current_project_id or 'none'}. "
             f"Current task: {context.current_task_id or 'none'}. "
-            f"Current document: {context.current_document_filename or context.current_document_id or 'none'}."
+            f"Current document: {context.current_document_filename or context.current_document_id or 'none'}. "
+            f"Current note: {context.current_note_id or 'none'}. "
+            f"Current workflow: {context.current_workflow_id or 'none'}."
         )
         return self._response(
             request,
@@ -455,6 +482,114 @@ class ProjectCopilotService:
             context.current_project_id = int(result.result["project_id"])
         if "task_id" in result.result:
             context.current_task_id = int(result.result["task_id"])
+        if "note_id" in result.result:
+            context.current_note_id = int(result.result["note_id"])
+
+    def _create_workflow_state(
+        self,
+        *,
+        context: SessionContext,
+        action_id: str,
+        tool_call: ToolCall,
+        preview: str,
+    ) -> str:
+        workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
+        workflow_type = _workflow_type(tool_call)
+        args = tool_call.args.clean()
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO productivity_workflows(
+                  workflow_id,
+                  session_id,
+                  workflow_type,
+                  status,
+                  pending_action_id,
+                  source_document_id,
+                  source_note_id,
+                  summary
+                )
+                VALUES (?, ?, ?, 'awaiting_review', ?, ?, ?, ?)
+                """,
+                (
+                    workflow_id,
+                    context.session_id,
+                    workflow_type,
+                    action_id,
+                    args.get("source_document_id") or context.current_document_id,
+                    args.get("note_id") or context.current_note_id,
+                    preview,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO workflow_steps(workflow_id, step_index, name, status, output_json)
+                VALUES (?, 1, 'proposed_tool_action', 'awaiting_review', ?)
+                """,
+                (
+                    workflow_id,
+                    json.dumps(
+                        {
+                            "tool_name": tool_call.name,
+                            "args": args,
+                            "preview": preview,
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
+            conn.commit()
+        context.current_workflow_id = workflow_id
+        return workflow_id
+
+    def _finish_workflow_state(self, context: SessionContext, action_id: str, result: ToolResult) -> str | None:
+        rows = self.db.execute_read(
+            """
+            SELECT workflow_id
+            FROM productivity_workflows
+            WHERE session_id = ? AND pending_action_id = ? AND status = 'awaiting_review'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (context.session_id, action_id),
+        )
+        if not rows:
+            return None
+        workflow_id = rows[0]["workflow_id"]
+        status = "completed" if result.ok else "failed"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE productivity_workflows
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_id = ?
+                """,
+                (status, workflow_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO workflow_steps(workflow_id, step_index, name, status, output_json)
+                VALUES (?, 2, 'confirmed_tool_execution', ?, ?)
+                """,
+                (
+                    workflow_id,
+                    status,
+                    result.model_dump_json(),
+                ),
+            )
+            conn.commit()
+        context.current_workflow_id = workflow_id
+        return workflow_id
+
+
+def _workflow_type(tool_call: ToolCall) -> str:
+    if tool_call.name == "create_note":
+        return "capture_personal_note"
+    if tool_call.name == "create_task" and (
+        tool_call.args.source_document_id or tool_call.args.note_id or tool_call.args.source_filename
+    ):
+        return "document_or_note_to_task"
+    return f"{tool_call.name}_workflow"
 
 
 def _explain_rows(rows: list[dict]) -> str:

@@ -444,24 +444,25 @@ evaluation run.
 
 ## Project 4: Agentic Project Copilot
 
-Project 4 adds a second use case to the repo. It is a retrieval and tool-use
-copilot rather than another e-commerce support bot.
+Project 4 adds a second use case to the repo. It is a local-first productivity
+workflow prototype rather than another e-commerce support bot.
 
 The main pattern is:
 
 ```text
-Copilot Orchestrator -> files/RAG | SQL/data | API tool | context | clarification
+Copilot Orchestrator -> files and notes/RAG | SQL/data | productivity tools | workflow state | context | clarification
 ```
 
 RAG is one capability path, not the whole system. The copilot also inspects a
-local SQLite schema, generates read-only SQL, validates it before execution, and
-requires confirmation before state-changing project API tools run.
+local SQLite schema, generates read-only SQL, validates it before execution,
+captures personal notes, persists reviewable workflow state, and requires
+confirmation before state-changing productivity tools run.
 
 The file RAG path persists uploaded document metadata, extracted chunks, and
-JSON embeddings in local SQLite. The UI document library can list, select, and
-delete stored documents. Upload and delete operations recompute embeddings for
-stored chunks so the local vector store remains consistent with the document
-tables.
+JSON embeddings in local SQLite. Personal notes, workflow runs, and workflow
+steps are also stored in SQLite. The UI document library can list, select, and
+delete stored documents. SQLite change events refresh affected chunk embeddings
+so the local vector store remains consistent with the document tables.
 
 See `project4_agentic_project_copilot/docs/architecture.md` for the detailed
 architecture, and `docs/project4_rag_pipeline.md` for the end-to-end RAG
