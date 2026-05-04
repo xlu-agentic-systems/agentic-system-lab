@@ -91,6 +91,7 @@ def test_observability_tool_schema_does_not_expose_raw_logql() -> None:
         "project2",
         "project3",
         "project4",
+        "project6",
     ]
     assert schema["parameters"]["required"] == ["project", "session_id"]
 

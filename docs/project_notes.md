@@ -13,6 +13,8 @@ which calls the Responses API and parses Pydantic structured outputs:
 - `POST /agent/query` and `POST /agent/tasks` in Project 5: an agentic access
   layer over deterministic metadata service tools
 - `POST /autonomous-runs` in Project 6: a bounded autonomous evaluation loop
+- Project 7 is not LLM-backed. It is a local mock video provider for backend
+  integration practice.
 
 Set `OPENAI_API_KEY` before running the API. The repo includes `.env.example`;
 copy it to `.env`, fill the key, and source it before starting FastAPI:
@@ -23,8 +25,9 @@ source .env
 set +a
 ```
 
-The application does not auto-load `.env`. `OPENAI_MODEL` defaults to `gpt-5.5`
-and can be overridden for evals or cost/latency tradeoffs.
+The application does not auto-load `.env`. Projects 1-4 and 6 default
+`OPENAI_MODEL` to `gpt-5.5`; Project 5's optional tool-calling agent defaults to
+`gpt-4.1-mini`. The model can be overridden for evals or cost/latency tradeoffs.
 
 Unit tests inject `RuleBasedLlmClient` instead of calling the network. That is
 intentional for the interview-focused version:
@@ -39,14 +42,19 @@ intentional for the interview-focused version:
 Use `docs/` for design and workflow notes. It keeps the repository readable:
 
 - `README.md`: quick start, purpose, and high-level explanation.
-- `docs/architecture.md`: system design, sequence diagram, safety boundaries.
+- `docs/architecture.md`: system design, sequence diagrams, safety boundaries,
+  and project-by-project architecture review.
 - `docs/tradeoffs.md`: cross-project architecture tradeoffs and non-goals.
 - `docs/latency_benchmark.md`: local benchmark strategy for comparing latency,
   caller concurrency, and architecture tradeoffs.
 - `docs/project4_rag_pipeline.md`: Project 4 upload, persistence, retrieval,
-  citation, document-library, and reindexing flow.
+  citation, document-library, and event-driven index freshness flow.
+- `docs/project4_rag_chunking_freshness.md`: Project 4 chunking benchmark and
+  freshness mechanism.
 - `project4_agentic_project_copilot/docs/architecture.md`: the retrieval,
   text-to-SQL, and project-tool copilot pattern.
+- `project6_autonomous_eval_agent/docs/architecture.md`: the bounded autonomous
+  evaluation loop.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/project_notes.md`: implementation rationale and agentic coding workflow.
 
@@ -124,10 +132,46 @@ API tool calls, session context, and clarification.
 Uploaded documents are persisted in local SQLite as document metadata, extracted
 text chunks, and JSON embeddings. The original file bytes are not stored. The UI
 document library can list, select, and delete stored documents. Insert and delete
-operations trigger a full embedding reindex of remaining stored chunks, which is
-simple and inspectable for the MVP.
+operations enqueue `document_index_events`; the app processes pending events to
+refresh only affected chunk embeddings. This is still simple and inspectable for
+the MVP while avoiding full-corpus reindexing after every document change.
 
 For the detailed sequence, see `docs/project4_rag_pipeline.md`.
+
+## Project 5 Metadata Boundary
+
+Project 5 makes sense as an agentic access-layer demo, not as a replacement for
+traditional metadata services. The metadata REST API, SQLAlchemy models, SQLite
+database, and `auth.py` policy checks stay deterministic. The natural-language
+agent, structured task endpoint, and MCP adapter all use `MetadataTools`, which
+calls the same REST API with the caller identity attached.
+
+The key review criterion for future changes is whether a new agent capability
+still goes through service policy. Avoid adding raw SQL, filesystem, or
+privileged MCP tools unless they are explicitly wrapped by deterministic checks.
+
+## Project 6 Autonomy Boundary
+
+Project 6 is a bounded loop around Project 3 artifacts. It is useful because the
+planner can choose the next evaluation repair step, but the host owns tool
+execution, `max_iterations`, acceptance gates, and output locations.
+
+Future Project 6 changes should preserve the distinction between review
+artifacts and production behavior. Candidate prompts belong under the per-run
+directory until a human reviews, tests, and merges them.
+
+## Project 7 Provider Mock Boundary
+
+Project 7 fills a different role from the agentic projects. It is local
+integration infrastructure for practicing async provider workflows. The mock
+state machine, asset store, webhook endpoint registry, signed deliveries, and
+delivery history are useful for backend practice, but they are process-local and
+not production-safe.
+
+Future Project 7 changes should keep that local-provider boundary explicit:
+document any new endpoint, keep default credentials out of public deployments,
+and add tests for provider-shaped behavior such as signatures, retry semantics,
+pagination, or state transitions when those behaviors are introduced.
 
 ## LLM Integration
 

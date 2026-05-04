@@ -1,7 +1,8 @@
 # Local Observability and Grafana Tooling
 
-This repo now has a small local observability layer for Projects 1-4. It is
-designed for agentic-system debugging, not production monitoring completeness.
+This repo now has a small local observability layer for Projects 1-4 and
+Project 6. It is designed for agentic-system debugging, not production
+monitoring completeness.
 
 ## Architecture
 
@@ -11,6 +12,7 @@ flowchart LR
     P2["Project 2 FastAPI"]
     P3["Project 3 FastAPI"]
     P4["Project 4 FastAPI"]
+    P6["Project 6 FastAPI"]
 
     JSON["JSON console logs"]
     Loki["Local Loki<br/>:3100"]
@@ -22,11 +24,13 @@ flowchart LR
     P2 --> JSON
     P3 --> JSON
     P4 --> JSON
+    P6 --> JSON
 
     P1 -. "AGENTIC_LAB_LOKI_URL" .-> Loki
     P2 -. "AGENTIC_LAB_LOKI_URL" .-> Loki
     P3 -. "AGENTIC_LAB_LOKI_URL" .-> Loki
     P4 -. "AGENTIC_LAB_LOKI_URL" .-> Loki
+    P6 -. "AGENTIC_LAB_LOKI_URL" .-> Loki
 
     Loki --> Grafana
     Agent -->|"session-scoped filters"| Tool
@@ -50,6 +54,7 @@ The shared helper emits compact structured events for system-level inspection:
   decisions.
 - `tool_execution`: backend tool validation/execution results.
 - `document_ingested` / `document_deleted`: Project 4 RAG document lifecycle.
+- `autonomous_run_started` / `autonomous_run_finished`: Project 6 run lifecycle.
 - `final_response`: final response metadata.
 
 The logs intentionally avoid storing raw prompts, uploaded document text, API

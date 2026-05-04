@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 from project7_video_provider_mock.app.mock_video_provider import (
     CallbackResult,
+    MockVideoProviderStore,
     MockVideoProviderSettings,
     SIGNATURE_HEADER,
+    VideoGenerationRequest,
     create_app,
 )
 
@@ -27,6 +29,18 @@ def make_client(callback_sender=None) -> TestClient:
     else:
         app = create_app(settings=settings, callback_sender=callback_sender)
     return TestClient(app)
+
+
+def make_client_with_store() -> tuple[TestClient, MockVideoProviderStore]:
+    settings = MockVideoProviderSettings(
+        api_key="dev-key",
+        webhook_secret="dev-secret",
+        public_base_url="http://mock-video-provider.test",
+        step_delay_seconds=0,
+    )
+    store = MockVideoProviderStore()
+    app = create_app(settings=settings, store=store)
+    return TestClient(app), store
 
 
 def test_mock_video_generation_job_completes_and_exposes_video_url() -> None:
@@ -149,6 +163,131 @@ def test_registered_webhook_endpoint_gets_secret_and_receives_matching_events() 
         endpoint["secret"].encode("utf-8"), body, hashlib.sha256
     ).hexdigest()
     assert headers[SIGNATURE_HEADER] == expected_signature
+
+
+def test_upload_asset_returns_retrievable_mock_asset() -> None:
+    client = make_client()
+
+    response = client.post(
+        "/v1/assets",
+        headers=AUTH_HEADERS,
+        files={"file": ("reference.txt", b"asset bytes", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    asset = response.json()["data"]
+    assert asset["mime_type"] == "text/plain"
+    assert asset["size_bytes"] == len(b"asset bytes")
+
+    asset_response = client.get(f"/mock-assets/{asset['asset_id']}")
+    assert asset_response.status_code == 200
+    assert asset_response.content == b"asset bytes"
+    assert asset_response.headers["content-type"] == "text/plain; charset=utf-8"
+
+
+def test_webhook_endpoint_can_be_patched_rotated_and_deleted() -> None:
+    client = make_client()
+
+    create_response = client.post(
+        "/v1/webhooks/endpoints",
+        headers=AUTH_HEADERS,
+        json={"url": "https://main-app.test/webhooks/a"},
+    )
+    endpoint = create_response.json()["data"]
+
+    patch_response = client.patch(
+        f"/v1/webhooks/endpoints/{endpoint['endpoint_id']}",
+        headers=AUTH_HEADERS,
+        json={
+            "url": "https://main-app.test/webhooks/b",
+            "events": ["video_generation.failed"],
+            "entity_id": "vid_123",
+        },
+    )
+    patched = patch_response.json()["data"]
+    assert patched["url"] == "https://main-app.test/webhooks/b"
+    assert patched["events"] == ["video_generation.failed"]
+    assert patched["entity_id"] == "vid_123"
+    assert patched["secret"] is None
+
+    rotate_response = client.post(
+        f"/v1/webhooks/endpoints/{endpoint['endpoint_id']}/rotate-secret",
+        headers=AUTH_HEADERS,
+    )
+    rotated = rotate_response.json()["data"]
+    assert rotated["secret"].startswith("whsec_")
+    assert rotated["secret"] != endpoint["secret"]
+
+    delete_response = client.delete(
+        f"/v1/webhooks/endpoints/{endpoint['endpoint_id']}",
+        headers=AUTH_HEADERS,
+    )
+    assert delete_response.json()["data"] == {
+        "deleted": True,
+        "endpoint_id": endpoint["endpoint_id"],
+    }
+
+    list_response = client.get("/v1/webhooks/endpoints", headers=AUTH_HEADERS)
+    assert list_response.json()["data"] == []
+
+
+def test_webhook_events_can_be_filtered_and_bearer_auth_works() -> None:
+    async def callback_sender(url, body, headers, timeout_seconds):
+        return CallbackResult(status_code=200, ok=True)
+
+    client = make_client(callback_sender=callback_sender)
+    bearer_headers = {"Authorization": "Bearer dev-key"}
+
+    success_response = client.post(
+        "/v1/video-generations",
+        headers=bearer_headers,
+        json={
+            "prompt": "Create a successful webhook event",
+            "callback_url": "https://main-app.test/webhooks/video-provider",
+        },
+    )
+    failed_response = client.post(
+        "/v1/video-generations",
+        headers=bearer_headers,
+        json={
+            "prompt": "Create a failed webhook event",
+            "callback_url": "https://main-app.test/webhooks/video-provider",
+            "mock_outcome": "fail",
+        },
+    )
+
+    assert success_response.status_code == 200
+    assert failed_response.status_code == 200
+    success_video_id = success_response.json()["data"]["video_id"]
+
+    completed_events_response = client.get(
+        "/v1/webhooks/events?event_type=video_generation.completed",
+        headers=bearer_headers,
+    )
+    completed_events = completed_events_response.json()["data"]
+    assert len(completed_events) == 1
+    assert completed_events[0]["event_type"] == "video_generation.completed"
+
+    video_events_response = client.get(
+        f"/v1/webhooks/events?entity_id={success_video_id}",
+        headers=bearer_headers,
+    )
+    video_events = video_events_response.json()["data"]
+    assert len(video_events) == 1
+    assert video_events[0]["event_data"]["video_id"] == success_video_id
+
+
+def test_mock_file_returns_conflict_before_video_completes() -> None:
+    client, store = make_client_with_store()
+    video = store.create_video(
+        VideoGenerationRequest(prompt="Create a pending video"),
+        client.app.state.mock_video_provider_settings,
+    )
+
+    response = client.get(f"/mock-files/{video.video_id}.mp4")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "resource_not_ready"
 
 
 def test_mock_api_requires_api_key() -> None:

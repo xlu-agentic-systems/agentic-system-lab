@@ -38,7 +38,8 @@ root-level `app/` package.
 
 ## Docs
 
-- `docs/architecture.md`: current architecture for the implemented projects.
+- `docs/architecture.md`: current architecture for Projects 1-7, including
+  project-specific boundaries and comparison matrix.
 - `docs/tradeoffs.md`: cross-project design tradeoffs and non-goals.
 - `docs/example_conversations.md`: representative request/response traces.
 - `docs/latency_benchmark.md`: local latency/concurrency benchmark strategy,
@@ -46,9 +47,13 @@ root-level `app/` package.
 - `docs/observability.md`: local Grafana/Loki stack, structured agent logs, and
   the safe read-only `query_agent_logs` tool.
 - `docs/project4_rag_pipeline.md`: Project 4 RAG pipeline, document
-  persistence, document library, retrieval, citations, and reindexing.
+  persistence, document library, retrieval, citations, and index freshness.
+- `docs/project4_rag_chunking_freshness.md`: Project 4 chunking benchmark and
+  SQLite event-driven embedding refresh notes.
 - `project4_agentic_project_copilot/docs/architecture.md`: retrieval and
   tool-use copilot architecture.
+- `project5_agentic_metadata_demo/README.md`: metadata REST service, agentic
+  access layer, structured task endpoint, and MCP adapter workflow.
 - `project6_autonomous_eval_agent/docs/architecture.md`: autonomous evaluation
   loop architecture.
 - `project7_video_provider_mock/README.md`: mock video provider API and webhook

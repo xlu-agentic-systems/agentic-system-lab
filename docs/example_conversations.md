@@ -128,7 +128,7 @@ Expected highlights:
 CLI:
 
 ```bash
-python -m project3_adaptive_eval_system.app.cli evaluate --limit 3
+python3 -m project3_adaptive_eval_system.app.cli evaluate --limit 3
 ```
 
 Expected highlights:
