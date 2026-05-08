@@ -45,6 +45,19 @@
       border-bottom: 1px solid var(--border);
       font-weight: 650;
     }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .debug-link {
+      color: var(--accent);
+      font-size: 13px;
+      text-decoration: none;
+      font-weight: 650;
+      white-space: nowrap;
+    }
     #messages {
       padding: 16px;
       overflow: auto;
@@ -156,7 +169,10 @@
 <body>
   <main>
     <section class="chat">
-      <header>Agentic Project Copilot</header>
+      <header>
+        <span>Agentic Project Copilot</span>
+        <a class="debug-link" href="/debug">Debug Traces</a>
+      </header>
       <div id="messages"></div>
       <form id="chat-form">
         <input id="message" type="text" autocomplete="off" placeholder="Ask about files, tasks, or actions">
@@ -185,6 +201,10 @@
 }</pre>
       </section>
       <section>
+        <h2>Trace</h2>
+        <pre id="trace">No trace yet.</pre>
+      </section>
+      <section>
         <h2>SQL</h2>
         <pre id="sql">No SQL yet.</pre>
       </section>
@@ -210,6 +230,7 @@
     const form = document.getElementById("chat-form");
     const input = document.getElementById("message");
     const context = document.getElementById("context");
+    const trace = document.getElementById("trace");
     const sql = document.getElementById("sql");
     const tool = document.getElementById("tool");
     const toolResult = document.getElementById("tool-result");
@@ -373,6 +394,7 @@
         const data = await response.json();
         addMessage("assistant", data.response);
         renderContext(data.context);
+        trace.textContent = data.trace_id ? `Trace: ${data.trace_id}\nOpen /debug to inspect the execution tree.` : "No trace id returned.";
         sql.textContent = data.generated_sql || "No SQL for this turn.";
         tool.textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn.";
         toolResult.textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn.";

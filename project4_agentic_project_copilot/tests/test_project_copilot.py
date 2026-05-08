@@ -50,6 +50,27 @@ def test_greeting_returns_without_model_call(tmp_path: Path) -> None:
     assert "Upload a file" in response.response
 
 
+def test_default_sqlite_trace_store_persists_trace_tree(tmp_path: Path) -> None:
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=RuleBasedLlmClient(),
+        embedding_client=HashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+    )
+
+    response = run(copilot.chat(ChatRequest(session_id="trace-sqlite", message="hello")))
+
+    assert response.trace_id
+    traces = run(copilot.list_traces())
+    assert traces.traces[0].trace_id == response.trace_id
+
+    detail = run(copilot.get_trace(response.trace_id))
+    assert detail.session_id == "trace-sqlite"
+    assert detail.spans[0].event_type == "user_message"
+    assert detail.spans[1].actor_name == "copilot_orchestrator"
+    assert detail.spans[-1].event_type == "final_response"
+
+
 def test_file_question_without_upload_returns_clarification_without_model_call(tmp_path: Path) -> None:
     copilot = ProjectCopilotService(
         db=CopilotDatabase(tmp_path / "copilot.sqlite3"),

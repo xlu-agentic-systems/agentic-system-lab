@@ -134,6 +134,7 @@ class ChatResponse(BaseModel):
     session_id: str
     response: str
     route: Route
+    trace_id: str | None = None
     citations: list[Citation] = Field(default_factory=list)
     generated_sql: str | None = None
     sql_result: SqlResult | None = None
@@ -179,6 +180,41 @@ class DeleteDocumentResponse(BaseModel):
 class FileAnswer(BaseModel):
     answer: str
     cited_chunk_ids: list[str] = Field(default_factory=list)
+
+
+class TraceSpan(BaseModel):
+    span_id: str
+    trace_id: str
+    parent_span_id: str | None = None
+    ordinal: int
+    actor_type: Literal["user", "orchestrator", "agent", "tool", "validator", "retriever", "sql", "backend", "response"]
+    actor_name: str
+    event_type: str
+    title: str
+    status: str
+    input_summary: str | None = None
+    output_summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TraceSummary(BaseModel):
+    trace_id: str
+    session_id: str
+    route: Route
+    status: str
+    user_message: str
+    final_response: str
+    span_count: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TraceDetail(TraceSummary):
+    spans: list[TraceSpan] = Field(default_factory=list)
+
+
+class TraceListResponse(BaseModel):
+    traces: list[TraceSummary]
 
 
 class EvaluationCase(BaseModel):

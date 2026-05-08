@@ -218,6 +218,37 @@ CREATE TABLE IF NOT EXISTS document_index_events (
   processed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS trace_turns (
+  trace_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  user_message TEXT NOT NULL,
+  final_response TEXT NOT NULL,
+  route TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS trace_spans (
+  span_id TEXT PRIMARY KEY,
+  trace_id TEXT NOT NULL,
+  parent_span_id TEXT,
+  ordinal INTEGER NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_name TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL,
+  input_summary TEXT,
+  output_summary TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(trace_id) REFERENCES trace_turns(trace_id) ON DELETE CASCADE,
+  FOREIGN KEY(parent_span_id) REFERENCES trace_spans(span_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS trace_turns_created_at_idx ON trace_turns(created_at);
+CREATE INDEX IF NOT EXISTS trace_spans_trace_ordinal_idx ON trace_spans(trace_id, ordinal);
+
 CREATE TRIGGER IF NOT EXISTS document_chunks_insert_index_event
 AFTER INSERT ON document_chunks
 BEGIN
