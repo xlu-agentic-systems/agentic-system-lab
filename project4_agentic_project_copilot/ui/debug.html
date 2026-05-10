@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 4 Trace Viewer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #202a37;
+      --muted: #64748b;
+      --border: #d8dee8;
+      --accent: #2563eb;
+      --soft: #e8f0ff;
+      --ok: #047857;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr) 380px;
+      min-height: 100vh;
+    }
+    aside, section {
+      min-width: 0;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      min-height: 58px;
+    }
+    h1, h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+    button, a.button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 650;
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    a.secondary {
+      background: #fff;
+      color: var(--accent);
+    }
+    .trace-list {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      overflow: auto;
+      max-height: calc(100vh - 58px);
+    }
+    .trace-card {
+      width: 100%;
+      text-align: left;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+    }
+    .trace-card.active {
+      border-color: var(--accent);
+      background: var(--soft);
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      background: #fff;
+    }
+    .content {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+    .summary {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 8px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .summary-box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: #fff;
+    }
+    .summary-box strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .tree {
+      padding: 16px;
+      overflow: auto;
+    }
+    .node {
+      border-left: 2px solid var(--border);
+      padding-left: 12px;
+      margin: 0 0 0 10px;
+    }
+    .span {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin: 8px 0;
+      background: #fff;
+      cursor: pointer;
+    }
+    .span.active {
+      border-color: var(--accent);
+      background: var(--soft);
+    }
+    .span-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 650;
+    }
+    .actor {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+    .detail {
+      border-right: 0;
+    }
+    .detail-body {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+      overflow: auto;
+      max-height: calc(100vh - 58px);
+    }
+    .field {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+    .field strong {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--ink);
+    }
+    .status-completed, .status-found, .status-allowed, .status-generated {
+      color: var(--ok);
+    }
+    .status-awaiting_review, .status-clarify {
+      color: var(--warn);
+    }
+    .status-failed, .status-blocked, .status-empty {
+      color: var(--bad);
+    }
+    @media (max-width: 1080px) {
+      main { grid-template-columns: 1fr; }
+      aside, section { border-right: 0; border-bottom: 1px solid var(--border); }
+      .trace-list, .detail-body { max-height: none; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <aside>
+      <header>
+        <h1>Traces</h1>
+        <button id="refresh" type="button">Refresh</button>
+      </header>
+      <div id="trace-list" class="trace-list"></div>
+    </aside>
+    <section class="content">
+      <header>
+        <h2>Execution Tree</h2>
+        <a class="button secondary" href="/">Back to Copilot</a>
+      </header>
+      <div id="summary" class="summary"></div>
+      <div id="tree" class="tree"></div>
+    </section>
+    <section class="detail">
+      <header>
+        <h2>Span Detail</h2>
+      </header>
+      <div id="detail" class="detail-body"></div>
+    </section>
+  </main>
+  <script>
+    const traceList = document.getElementById("trace-list");
+    const summary = document.getElementById("summary");
+    const tree = document.getElementById("tree");
+    const detail = document.getElementById("detail");
+    const refresh = document.getElementById("refresh");
+    let activeTraceId = null;
+    let activeSpanId = null;
+
+    function escapeText(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[character]);
+    }
+
+    function formatTime(value) {
+      if (!value) return "";
+      return new Date(value).toLocaleString();
+    }
+
+    async function loadTraces() {
+      const response = await fetch("/debug/traces?limit=50");
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const data = await response.json();
+      renderTraceList(data.traces || []);
+      if (data.traces?.length && !activeTraceId) {
+        await loadTrace(data.traces[0].trace_id);
+      }
+    }
+
+    function renderTraceList(traces) {
+      traceList.textContent = "";
+      if (!traces.length) {
+        traceList.innerHTML = '<div class="meta">No traces yet. Send a chat turn in the copilot, then refresh.</div>';
+        return;
+      }
+      traces.forEach((trace) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = `trace-card${trace.trace_id === activeTraceId ? " active" : ""}`;
+        item.innerHTML = `
+          <span class="pill">${escapeText(trace.route)} · ${escapeText(trace.status)}</span>
+          <strong>${escapeText(trace.user_message)}</strong>
+          <span class="meta">${escapeText(trace.session_id)} · ${trace.span_count} spans · ${formatTime(trace.created_at)}</span>
+        `;
+        item.addEventListener("click", () => loadTrace(trace.trace_id));
+        traceList.appendChild(item);
+      });
+    }
+
+    async function loadTrace(traceId) {
+      activeTraceId = traceId;
+      activeSpanId = null;
+      const response = await fetch(`/debug/traces/${encodeURIComponent(traceId)}`);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const trace = await response.json();
+      renderSummary(trace);
+      renderTree(trace);
+      renderSpan(trace.spans[0] || null);
+      await loadTraces();
+    }
+
+    function renderSummary(trace) {
+      summary.innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-box"><strong>Trace</strong>${escapeText(trace.trace_id)}</div>
+          <div class="summary-box"><strong>Session</strong>${escapeText(trace.session_id)}</div>
+          <div class="summary-box"><strong>Route</strong>${escapeText(trace.route)}</div>
+          <div class="summary-box"><strong>Status</strong>${escapeText(trace.status)}</div>
+        </div>
+        <div class="field"><strong>User Message</strong><pre>${escapeText(trace.user_message)}</pre></div>
+        <div class="field"><strong>Final Response</strong><pre>${escapeText(trace.final_response)}</pre></div>
+      `;
+    }
+
+    function renderTree(trace) {
+      const byParent = new Map();
+      trace.spans.forEach((span) => {
+        const key = span.parent_span_id || "root";
+        if (!byParent.has(key)) byParent.set(key, []);
+        byParent.get(key).push(span);
+      });
+      tree.textContent = "";
+      const roots = byParent.get("root") || [];
+      roots.forEach((span) => tree.appendChild(renderNode(span, byParent)));
+    }
+
+    function renderNode(span, byParent) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "node";
+      const card = document.createElement("div");
+      card.className = `span${span.span_id === activeSpanId ? " active" : ""}`;
+      card.innerHTML = `
+        <div class="span-title">
+          <span>${escapeText(span.title)}</span>
+          <span class="status-${escapeText(span.status)}">${escapeText(span.status)}</span>
+        </div>
+        <div class="actor">${escapeText(span.actor_type)} · ${escapeText(span.actor_name)} · ${escapeText(span.event_type)}</div>
+      `;
+      card.addEventListener("click", (event) => {
+        event.stopPropagation();
+        activeSpanId = span.span_id;
+        renderSpan(span);
+        document.querySelectorAll(".span").forEach((item) => item.classList.remove("active"));
+        card.classList.add("active");
+      });
+      wrapper.appendChild(card);
+      (byParent.get(span.span_id) || []).forEach((child) => wrapper.appendChild(renderNode(child, byParent)));
+      return wrapper;
+    }
+
+    function renderSpan(span) {
+      if (!span) {
+        detail.innerHTML = '<div class="meta">Select a trace span.</div>';
+        return;
+      }
+      activeSpanId = span.span_id;
+      detail.innerHTML = `
+        <div class="field"><strong>Title</strong><pre>${escapeText(span.title)}</pre></div>
+        <div class="field"><strong>Actor</strong><pre>${escapeText(span.actor_type)} / ${escapeText(span.actor_name)}</pre></div>
+        <div class="field"><strong>Status</strong><pre>${escapeText(span.status)}</pre></div>
+        <div class="field"><strong>Input</strong><pre>${escapeText(span.input_summary || "No input summary.")}</pre></div>
+        <div class="field"><strong>Output</strong><pre>${escapeText(span.output_summary || "No output summary.")}</pre></div>
+        <div class="field"><strong>Metadata</strong><pre>${escapeText(JSON.stringify(span.metadata || {}, null, 2))}</pre></div>
+      `;
+    }
+
+    refresh.addEventListener("click", () => {
+      loadTraces().catch((error) => {
+        traceList.innerHTML = `<div class="meta">Could not load traces: ${escapeText(error.message)}</div>`;
+      });
+    });
+
+    loadTraces().catch((error) => {
+      traceList.innerHTML = `<div class="meta">Could not load traces: ${escapeText(error.message)}</div>`;
+    });
+  </script>
+</body>
+</html>

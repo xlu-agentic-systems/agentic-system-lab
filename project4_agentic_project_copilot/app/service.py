@@ -22,13 +22,15 @@ from project4_agentic_project_copilot.app.models import (
     SelectDocumentResponse,
     SessionContext,
     SqlResult,
+    TraceDetail,
+    TraceListResponse,
     ToolCall,
     ToolResult,
 )
 from project4_agentic_project_copilot.app.session_store import JsonSessionStore, append_turn
 from project4_agentic_project_copilot.app.sql_safety import SqlSafetyError, validate_read_only_sql
 from project4_agentic_project_copilot.app.tools import ProjectToolService, WRITE_TOOLS
-from project4_agentic_project_copilot.app.trace_store import JsonlTraceStore
+from project4_agentic_project_copilot.app.trace_store import JsonlTraceStore, SqliteTraceStore
 
 
 logger = logging.getLogger(__name__)
@@ -42,13 +44,13 @@ class ProjectCopilotService:
         llm_client: LlmClient | None = None,
         embedding_client: EmbeddingClient | None = None,
         session_store: JsonSessionStore | None = None,
-        trace_store: JsonlTraceStore | None = None,
+        trace_store: JsonlTraceStore | SqliteTraceStore | None = None,
     ) -> None:
         self.db = db or CopilotDatabase()
         self.llm_client = llm_client or OpenAILlmClient()
         self.document_store = DocumentStore(self.db, embedding_client)
         self.session_store = session_store or JsonSessionStore()
-        self.trace_store = trace_store or JsonlTraceStore()
+        self.trace_store = trace_store or SqliteTraceStore(self.db)
         self.tools = ProjectToolService(self.db)
         self.orchestrator = CopilotOrchestrator(self.llm_client)
         self.sql_agent = SqlAgent(self.llm_client)
@@ -81,6 +83,12 @@ class ProjectCopilotService:
 
     async def list_documents(self) -> DocumentListResponse:
         return DocumentListResponse(documents=self.document_store.list_documents())
+
+    async def list_traces(self, limit: int = 50) -> TraceListResponse:
+        return TraceListResponse(traces=await self.trace_store.list_traces(limit=limit))
+
+    async def get_trace(self, trace_id: str) -> TraceDetail:
+        return await self.trace_store.get_trace(trace_id)
 
     async def select_document(self, *, session_id: str, document_id: str) -> SelectDocumentResponse:
         document = self.document_store.get_document(document_id)
@@ -473,7 +481,7 @@ class ProjectCopilotService:
 
     async def _persist(self, user_message: str, response: ChatResponse) -> None:
         await self.session_store.save(response.context)
-        await self.trace_store.append_response(user_message, response)
+        response.trace_id = await self.trace_store.append_response(user_message, response)
 
     def _update_context_from_tool(self, context: SessionContext, tool_call: ToolCall, result: ToolResult) -> None:
         if not result.ok or not isinstance(result.result, dict):

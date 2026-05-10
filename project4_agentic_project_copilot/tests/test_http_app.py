@@ -24,6 +24,9 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     index = client.get("/")
     assert index.status_code == 200
     assert index.headers["cache-control"] == "no-store, max-age=0"
+    debug = client.get("/debug")
+    assert debug.status_code == 200
+    assert debug.headers["cache-control"] == "no-store, max-age=0"
 
     upload = client.post(
         "/upload",
@@ -56,8 +59,25 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert chat.status_code == 200
     body = chat.json()
     assert body["route"] == "file_retrieval"
+    assert body["trace_id"]
     assert body["citations"]
     assert body["context"]["current_document_filename"] == "brief.md"
+
+    traces = client.get("/debug/traces")
+    assert traces.status_code == 200
+    trace_items = traces.json()["traces"]
+    assert trace_items
+    assert trace_items[0]["trace_id"] == body["trace_id"]
+    assert trace_items[0]["span_count"] >= 4
+
+    trace_detail = client.get(f"/debug/traces/{body['trace_id']}")
+    assert trace_detail.status_code == 200
+    detail_body = trace_detail.json()
+    assert detail_body["trace_id"] == body["trace_id"]
+    event_types = [span["event_type"] for span in detail_body["spans"]]
+    assert event_types[:2] == ["user_message", "route_decision"]
+    assert "retrieval" in event_types
+    assert "final_response" in event_types
 
     deleted = client.delete(f"/documents/{upload_body['document_id']}", params={"session_id": "http"})
     assert deleted.status_code == 200

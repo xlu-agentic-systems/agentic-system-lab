@@ -57,6 +57,16 @@ Then open:
 http://127.0.0.1:8004/
 ```
 
+The in-app trace viewer is available at:
+
+```text
+http://127.0.0.1:8004/debug
+```
+
+It visualizes each chat turn as an execution tree with the user turn,
+orchestrator route, invoked agent/tool path, validation decisions, retrieved
+evidence or SQL/tool artifacts, and final response lineage.
+
 The live app uses OpenAI for LLM calls and embeddings. Tests use deterministic
 local clients so they do not require network access.
 
@@ -102,6 +112,8 @@ The task schema includes:
 - `workflow_steps`
 - `documents`
 - `document_chunks`
+- `trace_turns`
+- `trace_spans`
 
 The vector store is implemented as SQLite `document_chunks` rows with JSON
 embeddings. This keeps the MVP local and inspectable while preserving the core
@@ -134,6 +146,28 @@ The pending action is also represented as a `productivity_workflows` row with
 `awaiting_review` status. Confirmation executes the tool and marks the workflow
 `completed` or `failed`, with `workflow_steps` preserving the proposed and
 confirmed execution records.
+
+## Trace Debugging
+
+Project 4 records structured execution traces in SQLite. Each chat response gets
+a `trace_id`, and the debug UI reads:
+
+```text
+GET /debug/traces
+GET /debug/traces/{trace_id}
+```
+
+Trace spans capture:
+
+- the user turn
+- the orchestrator route decision
+- RAG retrieval and answer synthesis
+- SQL generation, validation, and SQLite execution
+- tool proposal, review-gate blocking, and confirmed execution
+- context lookups, clarification handling, and final response assembly
+
+The trace viewer is meant for local debugging and QA. JSONL trace export remains
+available when a `JsonlTraceStore` is injected in tests or local harnesses.
 
 ## Eval Harnesses
 
