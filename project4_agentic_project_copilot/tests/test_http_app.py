@@ -38,12 +38,24 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert upload_body["chunk_count"] == 1
     assert upload_body["context"]["current_document_id"] == upload_body["document_id"]
     assert upload_body["context"]["current_document_filename"] == "brief.md"
+    assert upload_body["context"]["selected_documents"] == [
+        {"document_id": upload_body["document_id"], "filename": "brief.md"}
+    ]
+    assert upload_body["context"]["retrieval_scope"] == "current"
     assert upload_body["reindexed_chunk_count"] == 1
+
+    second_upload = client.post(
+        "/upload",
+        data={"session_id": "other"},
+        files={"file": ("roadmap.md", b"The roadmap mentions migration rehearsal.", "text/markdown")},
+    )
+    assert second_upload.status_code == 200
+    second_body = second_upload.json()
 
     listed = client.get("/documents")
     assert listed.status_code == 200
     listed_body = listed.json()
-    assert [document["filename"] for document in listed_body["documents"]] == ["brief.md"]
+    assert {document["filename"] for document in listed_body["documents"]} == {"brief.md", "roadmap.md"}
 
     selected = client.post(
         f"/documents/{upload_body['document_id']}/select",
@@ -52,16 +64,47 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert selected.status_code == 200
     assert selected.json()["context"]["current_document_filename"] == "brief.md"
 
+    attached = client.post(
+        f"/documents/{second_body['document_id']}/attach",
+        data={"session_id": "http"},
+    )
+    assert attached.status_code == 200
+    assert {document["document_id"] for document in attached.json()["context"]["selected_documents"]} == {
+        upload_body["document_id"],
+        second_body["document_id"],
+    }
+
+    scoped = client.post(
+        "/documents/scope",
+        data={"session_id": "http", "retrieval_scope": "selected"},
+    )
+    assert scoped.status_code == 200
+    assert scoped.json()["context"]["retrieval_scope"] == "selected"
+
     chat = client.post(
         "/chat",
-        json={"session_id": "http", "message": "What does the brief say about API contract review?"},
+        json={"session_id": "http", "message": "What do the selected documents say?"},
     )
     assert chat.status_code == 200
     body = chat.json()
     assert body["route"] == "file_retrieval"
     assert body["trace_id"]
     assert body["citations"]
-    assert body["context"]["current_document_filename"] == "brief.md"
+    assert body["decision_log"]["retrieval_scope"] == "selected"
+    assert {document["document_id"] for document in body["decision_log"]["searched_documents"]} == {
+        upload_body["document_id"],
+        second_body["document_id"],
+    }
+
+    detached = client.post(
+        f"/documents/{second_body['document_id']}/detach",
+        data={"session_id": "http"},
+    )
+    assert detached.status_code == 200
+    assert detached.json()["detached"] is True
+    assert [document["document_id"] for document in detached.json()["context"]["selected_documents"]] == [
+        upload_body["document_id"]
+    ]
 
     traces = client.get("/debug/traces")
     assert traces.status_code == 200
@@ -84,4 +127,7 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     deleted_body = deleted.json()
     assert deleted_body["deleted"] is True
     assert deleted_body["context"]["current_document_id"] is None
-    assert client.get("/documents").json()["documents"] == []
+    assert deleted_body["context"]["selected_documents"] == []
+    assert [document["document_id"] for document in client.get("/documents").json()["documents"]] == [
+        second_body["document_id"]
+    ]

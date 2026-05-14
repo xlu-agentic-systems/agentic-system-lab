@@ -123,6 +123,8 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
     assert upload.context is not None
     assert upload.context.current_document_id == upload.document_id
     assert upload.context.current_document_filename == "current_file.md"
+    assert [document.document_id for document in upload.context.selected_documents] == [upload.document_id]
+    assert upload.context.retrieval_scope == "current"
 
     response = run(
         copilot.chat(
@@ -138,6 +140,226 @@ def test_upload_sets_current_document_for_session(tmp_path: Path) -> None:
     assert response.context.current_document_filename == "current_file.md"
     assert response.citations
     assert response.citations[0].document_id == upload.document_id
+
+
+def test_selected_scope_retrieves_attached_documents_and_traces_metadata(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    first = run(
+        copilot.upload_file(
+            filename="alpha.md",
+            content_type="text/markdown",
+            content=b"# Alpha\nAlpha covers migration sequencing.",
+            session_id="multi",
+        )
+    )
+    second = run(
+        copilot.upload_file(
+            filename="beta.md",
+            content_type="text/markdown",
+            content=b"# Beta\nBeta covers API readiness.",
+            session_id="multi",
+        )
+    )
+    scoped = run(copilot.set_retrieval_scope(session_id="multi", retrieval_scope="selected"))
+
+    response = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="multi",
+                message="What do the selected documents say?",
+            )
+        )
+    )
+
+    assert scoped.context.retrieval_scope == "selected"
+    assert [document.document_id for document in scoped.context.selected_documents] == [
+        first.document_id,
+        second.document_id,
+    ]
+    assert response.route == "file_retrieval"
+    assert {citation.document_id for citation in response.citations} == {first.document_id, second.document_id}
+    assert response.decision_log.retrieval_scope == "selected"
+    assert {document.document_id for document in response.decision_log.searched_documents} == {
+        first.document_id,
+        second.document_id,
+    }
+    assert {document.document_id for document in response.decision_log.retrieved_documents} == {
+        first.document_id,
+        second.document_id,
+    }
+    raw_trace = (tmp_path / "traces.jsonl").read_text()
+    assert '"retrieval_scope":"selected"' in raw_trace
+    assert '"searched_documents"' in raw_trace
+    assert '"retrieved_documents"' in raw_trace
+
+
+def test_document_store_empty_document_ids_do_not_search_all_documents(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    run(
+        copilot.upload_file(
+            filename="stored.md",
+            content_type="text/markdown",
+            content=b"# Stored\nThis document should not be searched by an empty filter.",
+            session_id="empty-filter",
+        )
+    )
+
+    chunks = run(copilot.document_store.search("Stored", document_ids=[]))
+
+    assert chunks == []
+    assert copilot.document_store.has_documents(document_ids=[]) is False
+
+
+def test_current_selected_and_all_scopes_choose_expected_documents(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    first = run(
+        copilot.upload_file(
+            filename="current.md",
+            content_type="text/markdown",
+            content=b"# Current\nCurrent file covers release QA.",
+            session_id="scope",
+        )
+    )
+    second = run(
+        copilot.upload_file(
+            filename="other.md",
+            content_type="text/markdown",
+            content=b"# Other\nOther file covers customer migration.",
+            session_id="scope",
+        )
+    )
+    run(copilot.detach_document(session_id="scope", document_id=first.document_id))
+
+    current = run(copilot.chat(ChatRequest(session_id="scope", message="What does this file say?")))
+    run(copilot.set_retrieval_scope(session_id="scope", retrieval_scope="selected"))
+    selected = run(copilot.chat(ChatRequest(session_id="scope", message="What do the selected documents say?")))
+    run(copilot.set_retrieval_scope(session_id="scope", retrieval_scope="all"))
+    all_docs = run(copilot.chat(ChatRequest(session_id="scope", message="What do all documents say?")))
+
+    assert current.decision_log.retrieval_scope == "current"
+    assert {citation.document_id for citation in current.citations} == {second.document_id}
+    assert selected.decision_log.retrieval_scope == "selected"
+    assert {citation.document_id for citation in selected.citations} == {second.document_id}
+    assert all_docs.decision_log.retrieval_scope == "all"
+    assert {citation.document_id for citation in all_docs.citations} == {first.document_id, second.document_id}
+
+
+def test_file_question_can_override_scope_from_message(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    first = run(
+        copilot.upload_file(
+            filename="focused.md",
+            content_type="text/markdown",
+            content=b"# Focused\nFocused file covers QA ownership.",
+            session_id="message-scope",
+        )
+    )
+    second = run(
+        copilot.upload_file(
+            filename="attached.md",
+            content_type="text/markdown",
+            content=b"# Attached\nAttached file covers API contract review.",
+            session_id="message-scope",
+        )
+    )
+    run(copilot.set_retrieval_scope(session_id="message-scope", retrieval_scope="current"))
+
+    all_docs = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="message-scope",
+                message="Which file mentions API contract review across all documents?",
+            )
+        )
+    )
+    current = run(copilot.chat(ChatRequest(session_id="message-scope", message="What does this file say?")))
+
+    assert all_docs.decision_log.retrieval_scope == "all"
+    assert {citation.document_id for citation in all_docs.citations} == {first.document_id, second.document_id}
+    assert all_docs.context.current_document_id == second.document_id
+    assert current.decision_log.retrieval_scope == "current"
+    assert {citation.document_id for citation in current.citations} == {second.document_id}
+
+
+def test_all_scope_phrase_can_search_workspace_without_current_document(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    upload = run(
+        copilot.upload_file(
+            filename="workspace.md",
+            content_type="text/markdown",
+            content=b"# Workspace\nWorkspace document covers dependency cleanup.",
+            session_id="owner",
+        )
+    )
+
+    response = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="fresh-session",
+                message="Which file mentions dependency cleanup across all documents?",
+            )
+        )
+    )
+
+    assert response.route == "file_retrieval"
+    assert response.decision_log.retrieval_scope == "all"
+    assert response.context.current_document_id is None
+    assert {citation.document_id for citation in response.citations} == {upload.document_id}
+
+
+def test_selected_scope_phrase_takes_precedence_over_which_file(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    selected = run(
+        copilot.upload_file(
+            filename="selected.md",
+            content_type="text/markdown",
+            content=b"# Selected\nSelected file mentions API contract review.",
+            session_id="precedence",
+        )
+    )
+    unselected = run(
+        copilot.upload_file(
+            filename="unselected.md",
+            content_type="text/markdown",
+            content=b"# Unselected\nUnselected file mentions API contract review.",
+            session_id="other-session",
+        )
+    )
+
+    response = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="precedence",
+                message="Which selected file mentions API contract review?",
+            )
+        )
+    )
+
+    assert response.decision_log.retrieval_scope == "selected"
+    assert {citation.document_id for citation in response.citations} == {selected.document_id}
+    assert unselected.document_id not in {document.document_id for document in response.decision_log.searched_documents}
+
+
+def test_detaching_current_document_keeps_focus(tmp_path: Path) -> None:
+    copilot = service(tmp_path)
+    upload = run(
+        copilot.upload_file(
+            filename="focused.md",
+            content_type="text/markdown",
+            content=b"# Focused\nFocused file remains the current file.",
+            session_id="detach-focus",
+        )
+    )
+
+    detached = run(copilot.detach_document(session_id="detach-focus", document_id=upload.document_id))
+    response = run(copilot.chat(ChatRequest(session_id="detach-focus", message="What does this file say?")))
+
+    assert detached.detached is True
+    assert detached.context.current_document_id == upload.document_id
+    assert detached.context.selected_documents == []
+    assert response.route == "file_retrieval"
+    assert response.decision_log.retrieval_scope == "current"
+    assert {citation.document_id for citation in response.citations} == {upload.document_id}
 
 
 def test_upload_after_file_question_allows_how_about_now_followup(tmp_path: Path) -> None:
@@ -332,6 +554,7 @@ def test_document_library_select_delete_and_event_driven_freshness(tmp_path: Pat
     assert deleted.reindexed_chunk_count == 0
     assert deleted.context is not None
     assert deleted.context.current_document_id is None
+    assert all(document.document_id != first.document_id for document in deleted.context.selected_documents)
     assert embedding_client.calls == 3
     assert [document.document_id for document in remaining] == [second.document_id]
 

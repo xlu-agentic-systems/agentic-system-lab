@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 Route = Literal["context", "file_retrieval", "sql_query", "api_tool", "clarify"]
+RetrievalScope = Literal["current", "selected", "all"]
 ToolName = Literal[
     "create_task",
     "update_task_status",
@@ -54,12 +55,19 @@ class RetrievedChunk(Citation):
     text: str
 
 
+class DocumentReference(BaseModel):
+    document_id: str
+    filename: str
+
+
 class SessionContext(BaseModel):
     session_id: str
     current_project_id: int | None = None
     current_task_id: int | None = None
     current_document_id: str | None = None
     current_document_filename: str | None = None
+    selected_documents: list[DocumentReference] = Field(default_factory=list)
+    retrieval_scope: RetrievalScope = "current"
     current_note_id: int | None = None
     current_workflow_id: str | None = None
     pending_actions: dict[str, "ToolCall"] = Field(default_factory=dict)
@@ -127,6 +135,9 @@ class DecisionLog(BaseModel):
     generated_sql: str | None = None
     tool_name: ToolName | None = None
     workflow_id: str | None = None
+    retrieval_scope: RetrievalScope | None = None
+    searched_documents: list[DocumentReference] = Field(default_factory=list)
+    retrieved_documents: list[DocumentReference] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -167,6 +178,22 @@ class DocumentListResponse(BaseModel):
 
 class SelectDocumentResponse(BaseModel):
     document: DocumentSummary
+    context: SessionContext
+
+
+class AttachDocumentResponse(BaseModel):
+    document: DocumentSummary
+    context: SessionContext
+
+
+class DetachDocumentResponse(BaseModel):
+    document_id: str
+    detached: bool
+    context: SessionContext
+
+
+class RetrievalScopeResponse(BaseModel):
+    retrieval_scope: RetrievalScope
     context: SessionContext
 
 

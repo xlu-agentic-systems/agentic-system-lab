@@ -225,18 +225,30 @@ class DocumentStore:
             )
             conn.commit()
 
-    async def search(self, query: str, *, top_k: int = 4, document_id: str | None = None) -> list[RetrievedChunk]:
+    async def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 4,
+        document_id: str | None = None,
+        document_ids: list[str] | None = None,
+        diversify: bool = True,
+    ) -> list[RetrievedChunk]:
+        target_document_ids = _target_document_ids(document_id=document_id, document_ids=document_ids)
+        if target_document_ids == []:
+            return []
         query_embedding = await self.embedding_client.embed(query)
         with self.db.connect() as conn:
-            if document_id:
+            if target_document_ids is not None:
+                placeholders = ", ".join("?" for _ in target_document_ids)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT c.chunk_id, c.document_id, c.chunk_index, c.text, c.embedding_json, d.filename
                     FROM document_chunks c
                     JOIN documents d ON d.document_id = c.document_id
-                    WHERE c.document_id = ?
+                    WHERE c.document_id IN ({placeholders})
                     """,
-                    (document_id,),
+                    tuple(target_document_ids),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -260,12 +272,22 @@ class DocumentStore:
                     text=row["text"],
                 )
             )
-        return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+        ranked = sorted(scored, key=lambda item: item.score, reverse=True)
+        if diversify and not document_id:
+            return _diversified_top(ranked, top_k=top_k)
+        return ranked[:top_k]
 
-    def has_documents(self, document_id: str | None = None) -> bool:
+    def has_documents(self, document_id: str | None = None, document_ids: list[str] | None = None) -> bool:
+        target_document_ids = _target_document_ids(document_id=document_id, document_ids=document_ids)
+        if target_document_ids == []:
+            return False
         with self.db.connect() as conn:
-            if document_id:
-                row = conn.execute("SELECT 1 FROM document_chunks WHERE document_id = ? LIMIT 1", (document_id,)).fetchone()
+            if target_document_ids is not None:
+                placeholders = ", ".join("?" for _ in target_document_ids)
+                row = conn.execute(
+                    f"SELECT 1 FROM document_chunks WHERE document_id IN ({placeholders}) LIMIT 1",
+                    tuple(target_document_ids),
+                ).fetchone()
             else:
                 row = conn.execute("SELECT 1 FROM document_chunks LIMIT 1").fetchone()
         return row is not None
@@ -326,6 +348,46 @@ def _chunk_fixed(normalized: str, *, chunk_size: int, overlap: int) -> list[str]
 
 def _split_paragraphs(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen = set()
+    unique = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            unique.append(value)
+    return unique
+
+
+def _target_document_ids(*, document_id: str | None, document_ids: list[str] | None) -> list[str] | None:
+    if document_id:
+        return _dedupe([document_id])
+    if document_ids is not None:
+        return _dedupe(document_ids)
+    return None
+
+
+def _diversified_top(chunks: list[RetrievedChunk], *, top_k: int) -> list[RetrievedChunk]:
+    by_document: dict[str, list[RetrievedChunk]] = {}
+    for chunk in chunks:
+        by_document.setdefault(chunk.document_id, []).append(chunk)
+    document_order = sorted(
+        by_document,
+        key=lambda document_id: by_document[document_id][0].score,
+        reverse=True,
+    )
+    diversified: list[RetrievedChunk] = []
+    while len(diversified) < top_k and document_order:
+        next_order = []
+        for document_id in document_order:
+            document_chunks = by_document[document_id]
+            if document_chunks and len(diversified) < top_k:
+                diversified.append(document_chunks.pop(0))
+            if document_chunks:
+                next_order.append(document_id)
+        document_order = next_order
+    return diversified
 
 
 def _split_sentences(text: str) -> list[str]:
