@@ -142,6 +142,22 @@
       padding: 5px 8px;
       font-size: 12px;
     }
+    .scope-control {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .scope-control button {
+      background: #fff;
+      color: var(--accent);
+      padding: 6px 9px;
+      font-size: 12px;
+    }
+    .scope-control button.active {
+      background: var(--accent);
+      color: #fff;
+    }
     .citation {
       border-left: 3px solid var(--accent);
       padding-left: 8px;
@@ -171,6 +187,12 @@
         <button id="upload" type="button">Upload</button>
         <p id="upload-status" class="small"></p>
         <p id="selected-document" class="state-line">No file selected.</p>
+        <p id="selected-documents" class="state-line">No selected files.</p>
+        <div id="scope-control" class="scope-control" aria-label="Retrieval scope">
+          <button type="button" data-scope="current">Current</button>
+          <button type="button" data-scope="selected">Selected</button>
+          <button type="button" data-scope="all">All</button>
+        </div>
       </section>
       <section>
         <h2>Documents</h2>
@@ -181,7 +203,9 @@
         <pre id="context">{
   "current_project_id": null,
   "current_task_id": null,
-  "current_document": null
+  "current_document": null,
+  "selected_documents": [],
+  "retrieval_scope": "current"
 }</pre>
       </section>
       <section>
@@ -217,7 +241,10 @@
     const confirmButton = document.getElementById("confirm");
     const uploadButton = document.getElementById("upload");
     const selectedDocument = document.getElementById("selected-document");
+    const selectedDocuments = document.getElementById("selected-documents");
     const documentsList = document.getElementById("documents-list");
+    const scopeControl = document.getElementById("scope-control");
+    const scopeButtons = Array.from(scopeControl.querySelectorAll("button[data-scope]"));
 
     function addMessage(role, text) {
       const item = document.createElement("div");
@@ -236,11 +263,17 @@
     }
 
     function normalizeContext(rawContext = {}) {
+      const selected = Array.isArray(rawContext.selected_documents) ? rawContext.selected_documents : [];
       return {
         current_project_id: rawContext.current_project_id || null,
         current_task_id: rawContext.current_task_id || null,
         current_document_id: rawContext.current_document_id || (rawContext.current_document && rawContext.current_document.id) || null,
-        current_document_filename: rawContext.current_document_filename || (rawContext.current_document && rawContext.current_document.filename) || null
+        current_document_filename: rawContext.current_document_filename || (rawContext.current_document && rawContext.current_document.filename) || null,
+        selected_documents: selected.map((documentInfo) => ({
+          document_id: documentInfo.document_id || documentInfo.id,
+          filename: documentInfo.filename || documentInfo.document_id || documentInfo.id
+        })).filter((documentInfo) => documentInfo.document_id),
+        retrieval_scope: rawContext.retrieval_scope || "current"
       };
     }
 
@@ -249,15 +282,25 @@
       const currentDocumentId = normalized.current_document_id;
       const currentDocumentFilename = normalized.current_document_filename;
       selectedDocument.textContent = currentDocumentFilename
-        ? `Current file: ${currentDocumentFilename}`
+        ? `Focused file: ${currentDocumentFilename}`
         : currentDocumentId ? "Current file selected." : "No file selected.";
+      selectedDocuments.textContent = normalized.selected_documents.length
+        ? `Selected files: ${normalized.selected_documents.map((documentInfo) => documentInfo.filename).join(", ")}`
+        : "No selected files.";
+      scopeButtons.forEach((button) => {
+        const active = button.dataset.scope === normalized.retrieval_scope;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
       context.textContent = JSON.stringify({
         current_project_id: normalized.current_project_id,
         current_task_id: normalized.current_task_id,
         current_document: currentDocumentId ? {
           id: currentDocumentId,
           filename: currentDocumentFilename
-        } : null
+        } : null,
+        selected_documents: normalized.selected_documents,
+        retrieval_scope: normalized.retrieval_scope
       }, null, 2);
     }
 
@@ -281,12 +324,16 @@
         return;
       }
       const active = currentContext().current_document_id;
+      const selectedIds = new Set(currentContext().selected_documents.map((documentInfo) => documentInfo.document_id));
       documents.forEach((documentInfo) => {
         const row = document.createElement("div");
         row.className = "document-row";
         const title = document.createElement("div");
         title.className = "document-title";
-        title.textContent = active === documentInfo.document_id ? `${documentInfo.filename} (current)` : documentInfo.filename;
+        const labels = [];
+        if (active === documentInfo.document_id) labels.push("focused");
+        if (selectedIds.has(documentInfo.document_id)) labels.push("selected");
+        title.textContent = labels.length ? `${documentInfo.filename} (${labels.join(", ")})` : documentInfo.filename;
         const meta = document.createElement("div");
         meta.textContent = `${documentInfo.chunk_count} chunks`;
         const actions = document.createElement("div");
@@ -294,14 +341,26 @@
         const selectButton = document.createElement("button");
         selectButton.className = "secondary";
         selectButton.type = "button";
-        selectButton.textContent = "Select";
+        selectButton.textContent = "Focus";
         selectButton.addEventListener("click", () => selectDocument(documentInfo.document_id));
+        const attachButton = document.createElement("button");
+        attachButton.className = "secondary";
+        attachButton.type = "button";
+        attachButton.textContent = selectedIds.has(documentInfo.document_id) ? "Detach" : "Attach";
+        attachButton.addEventListener("click", () => {
+          if (selectedIds.has(documentInfo.document_id)) {
+            detachDocument(documentInfo.document_id, documentInfo.filename);
+          } else {
+            attachDocument(documentInfo.document_id);
+          }
+        });
         const deleteButton = document.createElement("button");
         deleteButton.className = "danger";
         deleteButton.type = "button";
         deleteButton.textContent = "Delete";
         deleteButton.addEventListener("click", () => deleteDocument(documentInfo.document_id, documentInfo.filename));
         actions.appendChild(selectButton);
+        actions.appendChild(attachButton);
         actions.appendChild(deleteButton);
         row.appendChild(title);
         row.appendChild(meta);
@@ -323,10 +382,50 @@
         }
         const data = await response.json();
         renderContext(data.context);
-        addMessage("assistant", `Selected ${data.document.filename} as the current file.`);
+        addMessage("assistant", `Focused ${data.document.filename}.`);
         await loadDocuments();
       } catch (error) {
-        addMessage("assistant", `Select failed: ${error.message}`);
+        addMessage("assistant", `Focus failed: ${error.message}`);
+      }
+    }
+
+    async function attachDocument(documentId) {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      try {
+        const response = await fetch(`/documents/${encodeURIComponent(documentId)}/attach`, {
+          method: "POST",
+          body: formData
+        });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        renderContext(data.context);
+        addMessage("assistant", `Attached ${data.document.filename}.`);
+        await loadDocuments();
+      } catch (error) {
+        addMessage("assistant", `Attach failed: ${error.message}`);
+      }
+    }
+
+    async function detachDocument(documentId, filename) {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      try {
+        const response = await fetch(`/documents/${encodeURIComponent(documentId)}/detach`, {
+          method: "POST",
+          body: formData
+        });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        renderContext(data.context);
+        addMessage("assistant", data.detached ? `Detached ${filename}.` : `${filename} was not selected.`);
+        await loadDocuments();
+      } catch (error) {
+        addMessage("assistant", `Detach failed: ${error.message}`);
       }
     }
 
@@ -346,6 +445,26 @@
         await loadDocuments();
       } catch (error) {
         addMessage("assistant", `Delete failed: ${error.message}`);
+      }
+    }
+
+    async function setScope(scope) {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      formData.append("retrieval_scope", scope);
+      try {
+        const response = await fetch("/documents/scope", {
+          method: "POST",
+          body: formData
+        });
+        if (!response.ok) {
+          throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        renderContext(data.context);
+        addMessage("assistant", `File retrieval scope set to ${data.retrieval_scope}.`);
+      } catch (error) {
+        addMessage("assistant", `Scope update failed: ${error.message}`);
       }
     }
 
@@ -433,7 +552,9 @@
           current_project_id: existingContext.current_project_id || null,
           current_task_id: existingContext.current_task_id || null,
           current_document_id: data.document_id,
-          current_document_filename: data.filename
+          current_document_filename: data.filename,
+          selected_documents: [{ document_id: data.document_id, filename: data.filename }],
+          retrieval_scope: existingContext.retrieval_scope || "current"
         };
         document.getElementById("upload-status").textContent = `Uploaded ${data.filename} (${data.chunk_count} chunks)`;
         renderContext(uploadContext);
@@ -448,6 +569,10 @@
         uploadButton.disabled = false;
         uploadButton.textContent = "Upload";
       }
+    });
+
+    scopeButtons.forEach((button) => {
+      button.addEventListener("click", () => setScope(button.dataset.scope));
     });
 
     addMessage("assistant", "Ask about uploaded docs, query tasks, or request task actions. Writes require confirmation.");

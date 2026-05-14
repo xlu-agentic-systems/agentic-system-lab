@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from agentic_system_lab.observability import log_agent_event
@@ -12,13 +13,18 @@ from project4_agentic_project_copilot.app.document_store import DocumentStore
 from project4_agentic_project_copilot.app.embeddings import EmbeddingClient
 from project4_agentic_project_copilot.app.llm import LlmClient, OpenAILlmClient
 from project4_agentic_project_copilot.app.models import (
+    AttachDocumentResponse,
     ChatRequest,
     ChatResponse,
     Citation,
     DeleteDocumentResponse,
     DecisionLog,
+    DetachDocumentResponse,
+    DocumentReference,
     DocumentListResponse,
     PendingAction,
+    RetrievalScope,
+    RetrievalScopeResponse,
     SelectDocumentResponse,
     SessionContext,
     SqlResult,
@@ -32,6 +38,15 @@ from project4_agentic_project_copilot.app.trace_store import JsonlTraceStore
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _DocumentRetrievalTarget:
+    scope: RetrievalScope
+    document_ids: list[str] | None
+    documents: list[DocumentReference]
+    reasoning: str | None = None
+    reason: str | None = None
 
 
 class ProjectCopilotService:
@@ -74,6 +89,7 @@ class ProjectCopilotService:
             context = await self.session_store.load(session_id)
             context.current_document_id = upload.document_id
             context.current_document_filename = upload.filename
+            _attach_document(context, DocumentReference(document_id=upload.document_id, filename=upload.filename))
             append_turn(context, role="assistant", content=f"Uploaded {filename} and selected it as the current document.")
             await self.session_store.save(context)
             upload.context = context
@@ -89,9 +105,38 @@ class ProjectCopilotService:
         context = await self.session_store.load(session_id)
         context.current_document_id = document.document_id
         context.current_document_filename = document.filename
+        _attach_document(context, _document_reference(document))
         append_turn(context, role="assistant", content=f"Selected {document.filename} as the current document.")
         await self.session_store.save(context)
         return SelectDocumentResponse(document=document, context=context)
+
+    async def attach_document(self, *, session_id: str, document_id: str) -> AttachDocumentResponse:
+        document = self.document_store.get_document(document_id)
+        if document is None:
+            raise ValueError(f"document {document_id} does not exist")
+        context = await self.session_store.load(session_id)
+        _attach_document(context, _document_reference(document))
+        if not context.current_document_id:
+            context.current_document_id = document.document_id
+            context.current_document_filename = document.filename
+        append_turn(context, role="assistant", content=f"Attached {document.filename} to selected files.")
+        await self.session_store.save(context)
+        return AttachDocumentResponse(document=document, context=context)
+
+    async def detach_document(self, *, session_id: str, document_id: str) -> DetachDocumentResponse:
+        context = await self.session_store.load(session_id)
+        detached = _detach_document(context, document_id)
+        if detached:
+            append_turn(context, role="assistant", content="Detached the file from selected files.")
+        await self.session_store.save(context)
+        return DetachDocumentResponse(document_id=document_id, detached=detached, context=context)
+
+    async def set_retrieval_scope(self, *, session_id: str, retrieval_scope: RetrievalScope) -> RetrievalScopeResponse:
+        context = await self.session_store.load(session_id)
+        context.retrieval_scope = retrieval_scope
+        append_turn(context, role="assistant", content=f"Set file retrieval scope to {retrieval_scope}.")
+        await self.session_store.save(context)
+        return RetrievalScopeResponse(retrieval_scope=retrieval_scope, context=context)
 
     async def delete_document(self, *, session_id: str | None, document_id: str) -> DeleteDocumentResponse:
         deleted, reindexed_count = await self.document_store.delete_document(document_id)
@@ -106,6 +151,7 @@ class ProjectCopilotService:
         context = None
         if session_id:
             context = await self.session_store.load(session_id)
+            _detach_document(context, document_id)
             if context.current_document_id == document_id:
                 context.current_document_id = None
                 context.current_document_filename = None
@@ -142,7 +188,7 @@ class ProjectCopilotService:
                     response = await self._answer_from_files(
                         request,
                         context,
-                        "The user asked about the current session document.",
+                        "The user asked about uploaded session documents.",
                         request.message,
                     )
                 else:
@@ -201,17 +247,18 @@ class ProjectCopilotService:
         reasoning: str,
         query: str,
     ) -> ChatResponse:
-        document_id = context.current_document_id
-        if not document_id:
+        target = self._resolve_document_retrieval_target(context, request.message)
+        if target.reason:
             return self._clarify(
                 request,
                 context,
-                "The user asked about files, but this session has no current document.",
-                "I do not have a file selected for this session yet. Upload a markdown, text, or PDF file first, then ask about it.",
+                target.reasoning or reasoning,
+                target.reason,
             )
-        if not self.document_store.has_documents(document_id):
+        if target.scope == "current" and target.document_ids and not self.document_store.has_documents(document_ids=target.document_ids):
             context.current_document_id = None
             context.current_document_filename = None
+            _detach_missing_documents(context, target.document_ids)
             return self._clarify(
                 request,
                 context,
@@ -225,7 +272,14 @@ class ProjectCopilotService:
                 "The user asked about files, but no uploaded document chunks are available.",
                 "I do not have an uploaded file in this workspace yet. Upload a markdown, text, or PDF file first, then ask about it.",
             )
-        chunks = await self.document_store.search(query, document_id=document_id)
+        chunks = await self.document_store.search(
+            query,
+            top_k=4 if target.scope == "current" else 8,
+            document_id=target.document_ids[0] if target.scope == "current" and target.document_ids else None,
+            document_ids=target.document_ids if target.scope == "selected" else None,
+            diversify=target.scope in {"selected", "all"},
+        )
+        retrieved_documents = _references_from_chunks(chunks)
         if not chunks:
             return self._response(
                 request,
@@ -233,7 +287,14 @@ class ProjectCopilotService:
                 response="I could not find relevant uploaded file content for that question.",
                 route="file_retrieval",
                 citations=[],
-                log=DecisionLog(route="file_retrieval", reasoning=reasoning, selected_data_source="uploaded_files"),
+                log=DecisionLog(
+                    route="file_retrieval",
+                    reasoning=reasoning,
+                    selected_data_source="uploaded_files",
+                    retrieval_scope=target.scope,
+                    searched_documents=target.documents,
+                    retrieved_documents=[],
+                ),
             )
         answer = await self.file_qa_agent.answer(
             request.message,
@@ -244,7 +305,7 @@ class ProjectCopilotService:
         citations: list[Citation] = [
             Citation(**chunk.model_dump(exclude={"text"})) for chunk in chunks if not cited_ids or chunk.chunk_id in cited_ids
         ]
-        if chunks:
+        if chunks and target.scope == "current":
             context.current_document_id = chunks[0].document_id
             context.current_document_filename = chunks[0].filename
         return self._response(
@@ -253,7 +314,14 @@ class ProjectCopilotService:
             response=answer.answer,
             route="file_retrieval",
             citations=citations,
-            log=DecisionLog(route="file_retrieval", reasoning=reasoning, selected_data_source="uploaded_files"),
+            log=DecisionLog(
+                route="file_retrieval",
+                reasoning=reasoning,
+                selected_data_source="uploaded_files",
+                retrieval_scope=target.scope,
+                searched_documents=target.documents,
+                retrieved_documents=retrieved_documents,
+            ),
         )
 
     async def _answer_from_sql(self, request: ChatRequest, context: SessionContext, reasoning: str) -> ChatResponse:
@@ -408,6 +476,8 @@ class ProjectCopilotService:
             f"Current project: {context.current_project_id or 'none'}. "
             f"Current task: {context.current_task_id or 'none'}. "
             f"Current document: {context.current_document_filename or context.current_document_id or 'none'}. "
+            f"Selected documents: {', '.join(document.filename for document in context.selected_documents) or 'none'}. "
+            f"Retrieval scope: {context.retrieval_scope}. "
             f"Current note: {context.current_note_id or 'none'}. "
             f"Current workflow: {context.current_workflow_id or 'none'}."
         )
@@ -443,13 +513,10 @@ class ProjectCopilotService:
                 "Simple greeting handled without a model call.",
                 "Hi. Upload a file or ask me about tasks, project data, or a task action.",
             )
-        if _asks_about_files(text) and not context.current_document_id:
-            return self._clarify(
-                request,
-                context,
-                "The user asked about a file before any file was uploaded.",
-                "I do not have an uploaded file in this workspace yet. Upload a markdown, text, or PDF file first, then ask about it.",
-            )
+        if _asks_about_files(text):
+            target = self._resolve_document_retrieval_target(context, request.message)
+            if target.reason:
+                return self._clarify(request, context, target.reasoning or "The user asked about files without available file context.", target.reason)
         return None
 
     def _model_error_response(self, request: ChatRequest, context: SessionContext, exc: Exception) -> ChatResponse:
@@ -542,6 +609,65 @@ class ProjectCopilotService:
         context.current_workflow_id = workflow_id
         return workflow_id
 
+    def _resolve_document_retrieval_target(self, context: SessionContext, message: str = "") -> "_DocumentRetrievalTarget":
+        scope = _scope_from_message(message) or context.retrieval_scope
+        if scope == "all":
+            documents = [_document_reference(document) for document in self.document_store.list_documents()]
+            if not documents:
+                return _DocumentRetrievalTarget(
+                    scope=scope,
+                    document_ids=[],
+                    documents=[],
+                    reasoning="The user asked about files, but no uploaded document chunks are available.",
+                    reason="I do not have an uploaded file in this workspace yet. Upload a markdown, text, or PDF file first, then ask about it.",
+                )
+            return _DocumentRetrievalTarget(scope=scope, document_ids=None, documents=documents)
+
+        if scope == "selected":
+            selected = self._existing_selected_documents(context)
+            if not selected:
+                return _DocumentRetrievalTarget(
+                    scope=scope,
+                    document_ids=[],
+                    documents=[],
+                    reasoning="The user asked about selected files, but this session has no selected documents.",
+                    reason="I do not have selected files for this session yet. Attach files or switch retrieval scope back to current.",
+                )
+            return _DocumentRetrievalTarget(
+                scope=scope,
+                document_ids=[document.document_id for document in selected],
+                documents=selected,
+            )
+
+        if not context.current_document_id:
+            return _DocumentRetrievalTarget(
+                scope=scope,
+                document_ids=[],
+                documents=[],
+                reasoning="The user asked about files, but this session has no current document.",
+                reason="I do not have a file selected for this session yet. Upload a markdown, text, or PDF file first, then ask about it.",
+            )
+        filename = context.current_document_filename or context.current_document_id
+        document = DocumentReference(document_id=context.current_document_id, filename=filename)
+        return _DocumentRetrievalTarget(scope=scope, document_ids=[context.current_document_id], documents=[document])
+
+    def _existing_selected_documents(self, context: SessionContext) -> list[DocumentReference]:
+        existing = []
+        for reference in context.selected_documents:
+            document = self.document_store.get_document(reference.document_id)
+            if document is not None and self.document_store.has_documents(document_id=document.document_id):
+                existing.append(_document_reference(document))
+        if len(existing) != len(context.selected_documents):
+            context.selected_documents = existing
+        return existing
+
+    def _has_retrieval_target(self, context: SessionContext) -> bool:
+        if context.retrieval_scope == "all":
+            return self.document_store.has_documents()
+        if context.retrieval_scope == "selected":
+            return bool(self._existing_selected_documents(context))
+        return bool(context.current_document_id)
+
     def _finish_workflow_state(self, context: SessionContext, action_id: str, result: ToolResult) -> str | None:
         rows = self.db.execute_read(
             """
@@ -582,6 +708,43 @@ class ProjectCopilotService:
         return workflow_id
 
 
+def _document_reference(document) -> DocumentReference:
+    return DocumentReference(document_id=document.document_id, filename=document.filename)
+
+
+def _attach_document(context: SessionContext, document: DocumentReference) -> None:
+    context.selected_documents = [
+        existing for existing in context.selected_documents if existing.document_id != document.document_id
+    ]
+    context.selected_documents.append(document)
+
+
+def _detach_document(context: SessionContext, document_id: str) -> bool:
+    before = len(context.selected_documents)
+    context.selected_documents = [
+        document for document in context.selected_documents if document.document_id != document_id
+    ]
+    return len(context.selected_documents) != before
+
+
+def _detach_missing_documents(context: SessionContext, document_ids: list[str]) -> None:
+    missing = set(document_ids)
+    context.selected_documents = [
+        document for document in context.selected_documents if document.document_id not in missing
+    ]
+
+
+def _references_from_chunks(chunks: list) -> list[DocumentReference]:
+    references: list[DocumentReference] = []
+    seen = set()
+    for chunk in chunks:
+        if chunk.document_id in seen:
+            continue
+        seen.add(chunk.document_id)
+        references.append(DocumentReference(document_id=chunk.document_id, filename=chunk.filename))
+    return references
+
+
 def _workflow_type(tool_call: ToolCall) -> str:
     if tool_call.name == "create_note":
         return "capture_personal_note"
@@ -617,8 +780,51 @@ def _asks_about_files(text: str) -> bool:
     return any(term in text for term in ("this file", "file", "document", "doc", "pdf", "markdown"))
 
 
+def _scope_from_message(message: str) -> RetrievalScope | None:
+    text = message.strip().lower()
+    if any(
+        phrase in text
+        for phrase in (
+            "selected documents",
+            "selected document",
+            "selected docs",
+            "selected doc",
+            "selected files",
+            "selected file",
+            "attached documents",
+            "attached document",
+            "attached docs",
+            "attached doc",
+            "attached files",
+            "attached file",
+        )
+    ):
+        return "selected"
+    if any(
+        phrase in text
+        for phrase in (
+            "all documents",
+            "all docs",
+            "all files",
+            "all uploaded documents",
+            "all uploaded docs",
+            "all uploaded files",
+            "across documents",
+            "across docs",
+            "across files",
+            "which document",
+            "which doc",
+            "which file",
+        )
+    ):
+        return "all"
+    if any(phrase in text for phrase in ("this file", "current file", "focused file", "this document", "current document")):
+        return "current"
+    return None
+
+
 def _should_answer_current_document(text: str, context: SessionContext) -> bool:
-    if not context.current_document_id:
+    if not (context.current_document_id or context.selected_documents or context.retrieval_scope == "all"):
         return False
     if _asks_about_files(text):
         return True

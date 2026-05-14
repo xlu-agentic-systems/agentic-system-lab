@@ -7,10 +7,14 @@ from fastapi.responses import FileResponse
 
 from agentic_system_lab.observability import configure_observability_logging
 from project4_agentic_project_copilot.app.models import (
+    AttachDocumentResponse,
     ChatRequest,
     ChatResponse,
     DeleteDocumentResponse,
+    DetachDocumentResponse,
     DocumentListResponse,
+    RetrievalScope,
+    RetrievalScopeResponse,
     SelectDocumentResponse,
     UploadResponse,
 )
@@ -72,6 +76,27 @@ async def select_document(document_id: str, session_id: str = Form(...)) -> Sele
         return await get_service().select_document(session_id=session_id, document_id=document_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/documents/{document_id}/attach", response_model=AttachDocumentResponse)
+async def attach_document(document_id: str, session_id: str = Form(...)) -> AttachDocumentResponse:
+    try:
+        return await get_service().attach_document(session_id=session_id, document_id=document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/documents/{document_id}/detach", response_model=DetachDocumentResponse)
+async def detach_document(document_id: str, session_id: str = Form(...)) -> DetachDocumentResponse:
+    return await get_service().detach_document(session_id=session_id, document_id=document_id)
+
+
+@app.post("/documents/scope", response_model=RetrievalScopeResponse)
+async def set_retrieval_scope(
+    session_id: str = Form(...),
+    retrieval_scope: RetrievalScope = Form(...),
+) -> RetrievalScopeResponse:
+    return await get_service().set_retrieval_scope(session_id=session_id, retrieval_scope=retrieval_scope)
 
 
 @app.delete("/documents/{document_id}", response_model=DeleteDocumentResponse)
