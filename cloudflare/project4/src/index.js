@@ -84,6 +84,12 @@ async function upload(env, request) {
 
   const content = new TextDecoder().decode(await file.arrayBuffer());
   const chunks = chunkText(content);
+  const maxChunks = Number(env.MAX_UPLOAD_CHUNKS || 40);
+  if (chunks.length > maxChunks) {
+    throw httpError(413, `File creates too many chunks for this deployment. Limit is ${maxChunks} chunks.`);
+  }
+  await enforceDailyBudget(env, request, "upload", Number(env.DAILY_UPLOAD_LIMIT || 20));
+  await enforceDailyBudget(env, request, "openai", Number(env.DAILY_GLOBAL_OPENAI_LIMIT || 100), chunks.length);
   const documentId = crypto.randomUUID();
   await run(env, "INSERT INTO documents(document_id, filename, content_type) VALUES (?, ?, ?)", [
     documentId,
@@ -154,6 +160,10 @@ async function deleteDocument(env, documentId, sessionId) {
 
 async function chat(env, request) {
   if (!request?.session_id || !request?.message) throw httpError(400, "session_id and message are required.");
+  await enforceDailyBudget(env, request, "chat", Number(env.DAILY_CHAT_LIMIT || 100));
+  if (!request.confirm_action_id) {
+    await enforceDailyBudget(env, request, "openai", Number(env.DAILY_GLOBAL_OPENAI_LIMIT || 100), 3);
+  }
   const context = await loadSession(env, request.session_id);
   appendTurn(context, "user", request.message);
 
@@ -677,6 +687,41 @@ async function first(env, sql, params = []) {
 async function run(env, sql, params = []) {
   const statement = env.DB.prepare(sql);
   return await (params.length ? statement.bind(...params) : statement).run();
+}
+
+async function enforceDailyBudget(env, request, bucket, limit, amount = 1) {
+  if (!Number.isFinite(limit) || limit <= 0) return;
+  const increment = Math.max(1, Math.ceil(Number(amount) || 1));
+  const date = new Date().toISOString().slice(0, 10);
+  const identity = currentIdentity(request, env);
+  const keys = [`usage:${date}:global:${bucket}`, `usage:${date}:user:${identity}:${bucket}`];
+  for (const key of keys) {
+    const existing = await first(env, "SELECT count FROM usage_counters WHERE counter_key = ?", [key]);
+    const count = Number(existing?.count || 0);
+    if (count + increment > limit) {
+      throw httpError(429, `Daily ${bucket} limit reached for this deployment. Try again tomorrow.`);
+    }
+  }
+  for (const key of keys) {
+    await run(
+      env,
+      `INSERT INTO usage_counters(counter_key, count, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(counter_key) DO UPDATE SET count = count + excluded.count, updated_at = CURRENT_TIMESTAMP`,
+      [key, increment],
+    );
+  }
+}
+
+function currentIdentity(request, env) {
+  return (
+    request.headers.get("Cf-Access-Authenticated-User-Email") ||
+    env.ALLOWED_EMAIL ||
+    "anonymous"
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.@-]/g, "_");
 }
 
 async function requireExists(env, table, column, value) {
