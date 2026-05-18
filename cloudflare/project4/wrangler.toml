@@ -1,0 +1,17 @@
+name = "agentic-project-copilot"
+main = "src/index.js"
+compatibility_date = "2026-05-18"
+workers_dev = true
+preview_urls = false
+
+[vars]
+OPENAI_MODEL = "gpt-5.5"
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_TIMEOUT_SECONDS = "30"
+MAX_UPLOAD_BYTES = "3145728"
+ALLOWED_EMAIL = "zgz2002xl@gmail.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "project4-copilot"
+database_id = "22e1fc5a-c75f-46d4-9593-9c34d6a13c1a"
