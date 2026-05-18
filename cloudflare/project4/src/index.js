@@ -88,7 +88,7 @@ async function upload(env, request) {
   if (chunks.length > maxChunks) {
     throw httpError(413, `File creates too many chunks for this deployment. Limit is ${maxChunks} chunks.`);
   }
-  await enforceDailyBudget(env, request, "upload", Number(env.DAILY_UPLOAD_LIMIT || 20));
+  await enforceDailyBudget(env, request, "upload", Number(env.DAILY_UPLOAD_LIMIT || 50));
   await enforceDailyBudget(env, request, "openai", Number(env.DAILY_GLOBAL_OPENAI_LIMIT || 100), chunks.length);
   const documentId = crypto.randomUUID();
   await run(env, "INSERT INTO documents(document_id, filename, content_type) VALUES (?, ?, ?)", [
@@ -160,7 +160,7 @@ async function deleteDocument(env, documentId, sessionId) {
 
 async function chat(env, request) {
   if (!request?.session_id || !request?.message) throw httpError(400, "session_id and message are required.");
-  await enforceDailyBudget(env, request, "chat", Number(env.DAILY_CHAT_LIMIT || 100));
+  await enforceDailyBudget(env, request, "chat", Number(env.DAILY_CHAT_LIMIT || 50));
   if (!request.confirm_action_id) {
     await enforceDailyBudget(env, request, "openai", Number(env.DAILY_GLOBAL_OPENAI_LIMIT || 100), 3);
   }
