@@ -559,6 +559,35 @@ def test_document_library_select_delete_and_event_driven_freshness(tmp_path: Pat
     assert [document.document_id for document in remaining] == [second.document_id]
 
 
+def test_large_upload_batches_embedding_refresh(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_EMBEDDING_BATCH_SIZE", "2")
+    embedding_client = CountingBatchEmbeddingClient()
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=RuleBasedLlmClient(),
+        embedding_client=embedding_client,
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    upload = run(
+        copilot.upload_file(
+            filename="large.md",
+            content_type="text/markdown",
+            content=("Large upload notes. " * 400).encode("utf-8"),
+            session_id="large-upload",
+        )
+    )
+
+    assert upload.chunk_count > 2
+    assert upload.reindexed_chunk_count == upload.chunk_count
+    assert sum(embedding_client.batch_sizes) == upload.chunk_count
+    assert max(embedding_client.batch_sizes) == 2
+    assert len(embedding_client.batch_sizes) < upload.chunk_count
+    assert embedding_client.single_calls == 0
+    assert copilot.document_store.pending_index_event_count() == 0
+
+
 def test_cdc_chunk_text_update_refreshes_embedding(tmp_path: Path) -> None:
     embedding_client = CountingHashEmbeddingClient()
     copilot = ProjectCopilotService(
@@ -911,6 +940,21 @@ class CountingHashEmbeddingClient(HashEmbeddingClient):
     async def embed(self, text: str) -> list[float]:
         self.calls += 1
         return await super().embed(text)
+
+
+class CountingBatchEmbeddingClient(HashEmbeddingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_sizes: list[int] = []
+        self.single_calls = 0
+
+    async def embed(self, text: str) -> list[float]:
+        self.single_calls += 1
+        return await super().embed(text)
+
+    async def embed_many(self, texts) -> list[list[float]]:
+        self.batch_sizes.append(len(texts))
+        return [await HashEmbeddingClient.embed(self, text) for text in texts]
 
 
 def _contains_open_dict(value) -> bool:

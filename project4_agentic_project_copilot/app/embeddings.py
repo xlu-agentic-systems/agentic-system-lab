@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import re
+from collections.abc import Sequence
 from typing import Protocol
 
 
@@ -27,6 +28,9 @@ class HashEmbeddingClient:
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
         return [value / norm for value in vector]
 
+    async def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        return [await self.embed(text) for text in texts]
+
 
 class OpenAIEmbeddingClient:
     def __init__(self, *, model: str | None = None, timeout_seconds: float | None = None) -> None:
@@ -39,6 +43,13 @@ class OpenAIEmbeddingClient:
         response = await client.embeddings.create(model=self.model, input=text)
         return list(response.data[0].embedding)
 
+    async def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        client = self._get_client()
+        response = await client.embeddings.create(model=self.model, input=list(texts))
+        return [list(item.embedding) for item in response.data]
+
     def _get_client(self):
         if self._client is None:
             try:
@@ -50,6 +61,13 @@ class OpenAIEmbeddingClient:
                 ) from exc
             self._client = AsyncOpenAI(timeout=self.timeout_seconds)
         return self._client
+
+
+async def embed_many(client: EmbeddingClient, texts: Sequence[str]) -> list[list[float]]:
+    batch_embed = getattr(client, "embed_many", None)
+    if batch_embed is not None:
+        return await batch_embed(texts)
+    return [await client.embed(text) for text in texts]
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
