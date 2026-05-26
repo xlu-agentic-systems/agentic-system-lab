@@ -144,6 +144,19 @@ The backend constrains retrieval to the current session document for file
 questions. This avoids one session accidentally answering from a document that
 another session uploaded.
 
+In a typical RAG turn, there are two LLM-backed agents:
+
+- `CopilotOrchestrator`: routes the request to `file_retrieval` and may produce
+  the search query.
+- `FileQaAgent`: handles the generation step by answering from retrieved chunks
+  and returning cited chunk ids.
+
+`DocumentStore` is not an agent. It handles query embedding, SQLite chunk lookup,
+cosine ranking, and top-k retrieval. The orchestrator does not call other agents
+directly; `ProjectCopilotService` receives its route decision and invokes the
+matching handler: `FileQaAgent` for file retrieval, `SqlAgent` for SQL,
+`ToolAgent` for API tools, or service-level context and clarification handlers.
+
 The `FileQaAgent` is instructed to answer using only retrieved chunks. The
 response includes citations built from retrieved chunk metadata:
 
