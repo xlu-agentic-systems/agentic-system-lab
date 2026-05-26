@@ -70,9 +70,9 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px;
-      white-space: pre-wrap;
       line-height: 1.45;
     }
+    .msg-text { white-space: pre-wrap; }
     .user { align-self: flex-end; background: var(--soft); }
     .assistant { align-self: flex-start; background: #fff; }
     form {
@@ -177,6 +177,26 @@
       margin: 6px 0;
       font-size: 13px;
     }
+    .message-citations {
+      border-top: 1px solid var(--border);
+      margin-top: 10px;
+      padding-top: 8px;
+    }
+    .message-citations h3 {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .citation-title {
+      display: block;
+      margin-bottom: 3px;
+      overflow-wrap: anywhere;
+    }
+    .citation-quote {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; }
     }
@@ -267,12 +287,45 @@
     const scopeControl = document.getElementById("scope-control");
     const scopeButtons = Array.from(scopeControl.querySelectorAll("button[data-scope]"));
 
-    function addMessage(role, text) {
+    function addMessage(role, text, messageCitations = []) {
       const item = document.createElement("div");
       item.className = `msg ${role}`;
-      item.textContent = text;
+      const textNode = document.createElement("div");
+      textNode.className = "msg-text";
+      textNode.textContent = text;
+      item.appendChild(textNode);
+      if (role === "assistant" && messageCitations.length) {
+        item.appendChild(renderCitationGroup(messageCitations));
+      }
       messages.appendChild(item);
       messages.scrollTop = messages.scrollHeight;
+    }
+
+    function renderCitationGroup(items) {
+      const group = document.createElement("div");
+      group.className = "message-citations";
+      const heading = document.createElement("h3");
+      heading.textContent = "Sources";
+      group.appendChild(heading);
+      items.forEach((citation) => {
+        group.appendChild(renderCitation(citation));
+      });
+      return group;
+    }
+
+    function renderCitation(citation) {
+      const item = document.createElement("div");
+      item.className = "citation";
+      const title = document.createElement("strong");
+      title.className = "citation-title";
+      const score = Number.isFinite(citation.score) ? ` · score ${citation.score.toFixed(3)}` : "";
+      title.textContent = `${citation.filename} · chunk ${citation.chunk_index}${score}`;
+      const quote = document.createElement("div");
+      quote.className = "citation-quote";
+      quote.textContent = citation.quote;
+      item.appendChild(title);
+      item.appendChild(quote);
+      return item;
     }
 
     function currentContext() {
@@ -511,7 +564,8 @@
           throw new Error(await readError(response) || `${response.status} ${response.statusText}`);
         }
         const data = await response.json();
-        addMessage("assistant", data.response);
+        const responseCitations = data.citations || [];
+        addMessage("assistant", data.response, responseCitations);
         renderContext(data.context);
         trace.textContent = data.trace_id ? `Trace: ${data.trace_id}\nOpen /debug to inspect the execution tree.` : "No trace id returned.";
         sql.textContent = data.generated_sql || "No SQL for this turn.";
@@ -520,17 +574,9 @@
         pendingActionId = data.pending_action ? data.pending_action.action_id : null;
         confirmButton.style.display = pendingActionId ? "block" : "none";
         citations.textContent = "";
-        if (data.citations.length) {
-          data.citations.forEach((citation) => {
-            const item = document.createElement("div");
-            item.className = "citation";
-            const title = document.createElement("strong");
-            title.textContent = citation.filename;
-            const quote = document.createElement("div");
-            quote.textContent = citation.quote;
-            item.appendChild(title);
-            item.appendChild(quote);
-            citations.appendChild(item);
+        if (responseCitations.length) {
+          responseCitations.forEach((citation) => {
+            citations.appendChild(renderCitation(citation));
           });
         } else {
           citations.textContent = "No citations for this turn.";
