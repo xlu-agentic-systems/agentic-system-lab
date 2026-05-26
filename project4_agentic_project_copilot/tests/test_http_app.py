@@ -24,6 +24,8 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     index = client.get("/")
     assert index.status_code == 200
     assert index.headers["cache-control"] == "no-store, max-age=0"
+    assert "message-citations" in index.text
+    assert 'addMessage("assistant", data.response, responseCitations)' in index.text
     debug = client.get("/debug")
     assert debug.status_code == 200
     assert debug.headers["cache-control"] == "no-store, max-age=0"
