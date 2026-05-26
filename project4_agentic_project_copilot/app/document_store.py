@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -8,13 +9,19 @@ from pathlib import Path
 from typing import Literal
 
 from project4_agentic_project_copilot.app.database import CopilotDatabase
-from project4_agentic_project_copilot.app.embeddings import EmbeddingClient, OpenAIEmbeddingClient, cosine_similarity
+from project4_agentic_project_copilot.app.embeddings import (
+    EmbeddingClient,
+    OpenAIEmbeddingClient,
+    cosine_similarity,
+    embed_many,
+)
 from project4_agentic_project_copilot.app.models import DocumentSummary, RetrievedChunk, UploadResponse
 
 
 SUPPORTED_TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".rst"}
 ChunkingStrategy = Literal["fixed", "paragraph", "sentence"]
 DEFAULT_CHUNKING_STRATEGY: ChunkingStrategy = "fixed"
+DEFAULT_EMBEDDING_BATCH_SIZE = 64
 
 
 @dataclass(frozen=True)
@@ -33,12 +40,16 @@ class DocumentStore:
         chunk_size: int = 900,
         chunk_overlap: int = 120,
         chunking_strategy: ChunkingStrategy = DEFAULT_CHUNKING_STRATEGY,
+        embedding_batch_size: int | None = None,
     ) -> None:
         self.db = db or CopilotDatabase()
         self.embedding_client = embedding_client or OpenAIEmbeddingClient()
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.chunking_strategy = chunking_strategy
+        self.embedding_batch_size = embedding_batch_size or int(
+            os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", str(DEFAULT_EMBEDDING_BATCH_SIZE))
+        )
 
     async def ingest_bytes(self, *, filename: str, content_type: str, content: bytes) -> UploadResponse:
         text = extract_text(filename, content)
@@ -137,8 +148,14 @@ class DocumentStore:
                 """
             ).fetchall()
         updates = []
-        for row in rows:
-            updates.append((json.dumps(await self.embedding_client.embed(row["text"])), row["chunk_id"]))
+        for batch in _batched(rows, self.embedding_batch_size):
+            embeddings = await embed_many(self.embedding_client, [row["text"] for row in batch])
+            if len(embeddings) != len(batch):
+                raise RuntimeError("Embedding batch response length did not match input length.")
+            updates.extend(
+                (json.dumps(embedding), row["chunk_id"])
+                for row, embedding in zip(batch, embeddings, strict=True)
+            )
         if updates:
             with self.db.connect() as conn:
                 conn.executemany("UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?", updates)
@@ -158,28 +175,53 @@ class DocumentStore:
             params = (limit,)
         with self.db.connect() as conn:
             events = conn.execute(query, params).fetchall()
-        reindexed_count = 0
         skipped_count = 0
+        refresh_items = []
         for event in events:
-            try:
-                if event["event_type"] in {"chunk_inserted", "chunk_text_updated"} and event["chunk_id"]:
-                    row = self._get_chunk_for_refresh(event["chunk_id"])
-                    if row is None:
-                        skipped_count += 1
-                    else:
-                        embedding = await self.embedding_client.embed(row["text"])
-                        with self.db.connect() as conn:
-                            conn.execute(
-                                "UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?",
-                                (json.dumps(embedding), event["chunk_id"]),
-                            )
-                            conn.commit()
-                        reindexed_count += 1
-                else:
+            if event["event_type"] in {"chunk_inserted", "chunk_text_updated"} and event["chunk_id"]:
+                row = self._get_chunk_for_refresh(event["chunk_id"])
+                if row is None:
                     skipped_count += 1
+                    self._mark_index_event_processed(event["event_id"])
+                else:
+                    refresh_items.append(
+                        {
+                            "event_id": event["event_id"],
+                            "chunk_id": event["chunk_id"],
+                            "text": row["text"],
+                        }
+                    )
+            else:
+                skipped_count += 1
                 self._mark_index_event_processed(event["event_id"])
+
+        reindexed_count = 0
+        for batch in _batched(refresh_items, self.embedding_batch_size):
+            try:
+                embeddings = await embed_many(self.embedding_client, [item["text"] for item in batch])
+                if len(embeddings) != len(batch):
+                    raise RuntimeError("Embedding batch response length did not match input length.")
+                with self.db.connect() as conn:
+                    conn.executemany(
+                        "UPDATE document_chunks SET embedding_json = ? WHERE chunk_id = ?",
+                        [
+                            (json.dumps(embedding), item["chunk_id"])
+                            for item, embedding in zip(batch, embeddings, strict=True)
+                        ],
+                    )
+                    conn.executemany(
+                        """
+                        UPDATE document_index_events
+                        SET status = 'processed', processed_at = CURRENT_TIMESTAMP, error = NULL
+                        WHERE event_id = ?
+                        """,
+                        [(item["event_id"],) for item in batch],
+                    )
+                    conn.commit()
+                reindexed_count += len(batch)
             except Exception as exc:
-                self._mark_index_event_failed(event["event_id"], str(exc))
+                for item in batch:
+                    self._mark_index_event_failed(item["event_id"], str(exc))
                 raise
         return FreshnessResult(
             processed_event_count=len(events),
@@ -344,6 +386,12 @@ def _chunk_fixed(normalized: str, *, chunk_size: int, overlap: int) -> list[str]
             break
         start = max(end - overlap, start + 1)
     return chunks
+
+
+def _batched(items, batch_size: int):
+    size = max(1, batch_size)
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
 
 
 def _split_paragraphs(text: str) -> list[str]:
