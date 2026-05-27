@@ -141,11 +141,19 @@ class DecisionLog(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ResponseTiming(BaseModel):
+    started_at: datetime
+    completed_at: datetime
+    elapsed_ms: int
+    note: str
+
+
 class ChatResponse(BaseModel):
     session_id: str
     response: str
     route: Route
     trace_id: str | None = None
+    response_timing: ResponseTiming | None = None
     citations: list[Citation] = Field(default_factory=list)
     generated_sql: str | None = None
     sql_result: SqlResult | None = None

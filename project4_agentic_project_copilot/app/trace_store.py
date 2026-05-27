@@ -398,6 +398,7 @@ def build_trace_detail(user_message: str, response: ChatResponse) -> TraceDetail
             "has_sql": response.generated_sql is not None,
             "has_tool_call": response.tool_call is not None,
             "pending_action": response.pending_action.action_id if response.pending_action else None,
+            "response_timing": response.response_timing.model_dump(mode="json") if response.response_timing else None,
         },
     )
 

@@ -160,6 +160,8 @@ async function deleteDocument(env, documentId, sessionId) {
 
 async function chat(env, request) {
   if (!request?.session_id || !request?.message) throw httpError(400, "session_id and message are required.");
+  const startedAt = new Date();
+  const startedMonotonic = performance.now();
   await enforceDailyBudget(env, request, "chat", Number(env.DAILY_CHAT_LIMIT || 50));
   if (!request.confirm_action_id) {
     await enforceDailyBudget(env, request, "openai", Number(env.DAILY_GLOBAL_OPENAI_LIMIT || 100), 3);
@@ -176,8 +178,24 @@ async function chat(env, request) {
   appendTurn(context, "assistant", response.response);
   response.context = context;
   await saveSession(env, context);
+  response.response_timing = buildResponseTiming(startedAt, startedMonotonic);
   response.trace_id = await appendTrace(env, request.message, response);
   return response;
+}
+
+function buildResponseTiming(startedAt, startedMonotonic) {
+  const elapsedMs = Math.max(0, Math.round(performance.now() - startedMonotonic));
+  return {
+    started_at: startedAt.toISOString(),
+    completed_at: new Date().toISOString(),
+    elapsed_ms: elapsedMs,
+    note: `Processed in ${formatElapsed(elapsedMs)}.`,
+  };
+}
+
+function formatElapsed(elapsedMs) {
+  if (elapsedMs < 1000) return `${elapsedMs} ms`;
+  return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
 async function answer(env, request, context) {
@@ -348,6 +366,7 @@ function makeResponse(request, context, route, response, extras = {}) {
     tool_call: extras.tool_call || null,
     tool_result: extras.tool_result || null,
     pending_action: extras.pending_action || null,
+    response_timing: null,
     context,
     decision_log: {
       route,
@@ -635,7 +654,7 @@ async function appendTrace(env, userMessage, response) {
       status: response.route,
       input_summary: response.decision_log.reasoning,
       output_summary: response.response,
-      metadata: { generated_sql: response.generated_sql, tool_name: response.decision_log.tool_name },
+      metadata: { generated_sql: response.generated_sql, tool_name: response.decision_log.tool_name, response_timing: response.response_timing },
       created_at: new Date().toISOString(),
     },
   ];
@@ -967,6 +986,7 @@ const INDEX_HTML = `<!doctype html>
     a { color:var(--accent); font-size:13px; text-decoration:none; font-weight:650; white-space:nowrap; }
     #messages { padding:16px; overflow:auto; display:flex; flex-direction:column; gap:12px; }
     .msg { max-width:820px; border:1px solid var(--border); border-radius:8px; padding:12px; white-space:pre-wrap; line-height:1.45; }
+    .message-meta { margin-top:8px; color:var(--muted); font-size:12px; }
     .user { align-self:flex-end; background:var(--soft); }
     .assistant { align-self:flex-start; background:#fff; }
     form { display:flex; gap:8px; padding:12px; border-top:1px solid var(--border); }
@@ -1013,7 +1033,7 @@ const INDEX_HTML = `<!doctype html>
     localStorage.setItem("copilotSessionId", sessionId);
     let pendingActionId = null;
     const $ = (id) => document.getElementById(id);
-    function addMessage(role, text) { const item = document.createElement("div"); item.className = "msg " + role; item.textContent = text; $("messages").appendChild(item); $("messages").scrollTop = $("messages").scrollHeight; }
+    function addMessage(role, text, responseTiming = null) { const item = document.createElement("div"); item.className = "msg " + role; const textNode = document.createElement("div"); textNode.textContent = text; item.appendChild(textNode); if (role === "assistant" && responseTiming && responseTiming.note) { const meta = document.createElement("div"); meta.className = "message-meta"; meta.textContent = responseTiming.note; item.appendChild(meta); } $("messages").appendChild(item); $("messages").scrollTop = $("messages").scrollHeight; }
     function normalizeContext(raw = {}) { return { current_project_id: raw.current_project_id || null, current_task_id: raw.current_task_id || null, current_document_id: raw.current_document_id || null, current_document_filename: raw.current_document_filename || null, current_note_id: raw.current_note_id || null, current_workflow_id: raw.current_workflow_id || null }; }
     function currentContext() { try { return normalizeContext(JSON.parse($("context").textContent)); } catch { return {}; } }
     function renderContext(raw = {}) { const c = normalizeContext(raw); $("selected-document").textContent = c.current_document_filename ? "Current file: " + c.current_document_filename : "No file selected."; $("context").textContent = JSON.stringify(c, null, 2); }
@@ -1022,7 +1042,7 @@ const INDEX_HTML = `<!doctype html>
     function renderDocuments(documents) { const list = $("documents-list"); list.textContent = ""; if (!documents.length) { list.textContent = "No uploaded documents."; return; } const active = currentContext().current_document_id; for (const doc of documents) { const row = document.createElement("div"); row.className = "document-row"; row.innerHTML = '<div class="document-title"></div><div class="small"></div><div class="document-actions"></div>'; row.children[0].textContent = active === doc.document_id ? doc.filename + " (current)" : doc.filename; row.children[1].textContent = doc.chunk_count + " chunks"; const select = document.createElement("button"); select.className = "secondary"; select.textContent = "Select"; select.onclick = () => selectDocument(doc.document_id); const del = document.createElement("button"); del.className = "danger"; del.textContent = "Delete"; del.onclick = () => deleteDocument(doc.document_id, doc.filename); row.children[2].append(select, del); list.appendChild(row); } }
     async function selectDocument(id) { const form = new FormData(); form.append("session_id", sessionId); try { const response = await fetch("/documents/" + encodeURIComponent(id) + "/select", { method: "POST", body: form }); if (!response.ok) throw new Error(await readError(response)); const data = await response.json(); renderContext(data.context); addMessage("assistant", "Selected " + data.document.filename + " as the current file."); await loadDocuments(); } catch (error) { addMessage("assistant", "Select failed: " + error.message); } }
     async function deleteDocument(id, filename) { try { const response = await fetch("/documents/" + encodeURIComponent(id) + "?session_id=" + encodeURIComponent(sessionId), { method: "DELETE" }); if (!response.ok) throw new Error(await readError(response)); const data = await response.json(); if (data.context) renderContext(data.context); addMessage("assistant", data.deleted ? "Deleted " + filename + "." : filename + " was not found."); await loadDocuments(); } catch (error) { addMessage("assistant", "Delete failed: " + error.message); } }
-    async function send(message, confirmActionId = null) { const body = { session_id: sessionId, message }; if (confirmActionId) body.confirm_action_id = confirmActionId; try { const response = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await readError(response)); const data = await response.json(); addMessage("assistant", data.response); renderContext(data.context); $("trace").textContent = data.trace_id ? "Trace: " + data.trace_id + "\\nOpen /debug to inspect it." : "No trace id returned."; $("sql").textContent = data.generated_sql || "No SQL for this turn."; $("tool").textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn."; $("tool-result").textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn."; pendingActionId = data.pending_action ? data.pending_action.action_id : null; $("confirm").style.display = pendingActionId ? "block" : "none"; $("citations").textContent = ""; if (data.citations.length) { for (const citation of data.citations) { const item = document.createElement("div"); item.className = "citation"; item.textContent = citation.filename + ": " + citation.quote; $("citations").appendChild(item); } } else { $("citations").textContent = "No citations for this turn."; } } catch (error) { addMessage("assistant", "Request failed: " + error.message); } }
+    async function send(message, confirmActionId = null) { const body = { session_id: sessionId, message }; if (confirmActionId) body.confirm_action_id = confirmActionId; try { const response = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await readError(response)); const data = await response.json(); addMessage("assistant", data.response, data.response_timing); renderContext(data.context); $("trace").textContent = data.trace_id ? "Trace: " + data.trace_id + "\\nOpen /debug to inspect it." : "No trace id returned."; $("sql").textContent = data.generated_sql || "No SQL for this turn."; $("tool").textContent = data.tool_call ? JSON.stringify(data.tool_call, null, 2) : "No tool call for this turn."; $("tool-result").textContent = data.tool_result ? JSON.stringify(data.tool_result, null, 2) : "No tool result for this turn."; pendingActionId = data.pending_action ? data.pending_action.action_id : null; $("confirm").style.display = pendingActionId ? "block" : "none"; $("citations").textContent = ""; if (data.citations.length) { for (const citation of data.citations) { const item = document.createElement("div"); item.className = "citation"; item.textContent = citation.filename + ": " + citation.quote; $("citations").appendChild(item); } } else { $("citations").textContent = "No citations for this turn."; } } catch (error) { addMessage("assistant", "Request failed: " + error.message); } }
     $("chat-form").addEventListener("submit", async (event) => { event.preventDefault(); const text = $("message").value.trim(); if (!text) return; $("message").value = ""; addMessage("user", text); await send(text); });
     $("confirm").addEventListener("click", async () => { if (!pendingActionId) return; addMessage("user", "Confirm action"); await send("Confirm action", pendingActionId); });
     $("upload").addEventListener("click", async () => { const file = $("file").files[0]; if (!file) return; const form = new FormData(); form.append("file", file); form.append("session_id", sessionId); $("upload").disabled = true; $("upload").textContent = "Uploading..."; try { const response = await fetch("/upload", { method: "POST", body: form }); if (!response.ok) throw new Error(await readError(response)); const data = await response.json(); $("upload-status").textContent = "Uploaded " + data.filename + " (" + data.chunk_count + " chunks)"; renderContext(data.context || { ...currentContext(), current_document_id: data.document_id, current_document_filename: data.filename }); addMessage("assistant", "Uploaded " + data.filename + " (" + data.chunk_count + " chunks). It is now the current file."); await loadDocuments(); } catch (error) { $("upload-status").textContent = "Upload failed: " + error.message; } finally { $("upload").disabled = false; $("upload").textContent = "Upload"; } });
