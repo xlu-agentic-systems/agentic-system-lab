@@ -4,7 +4,9 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 
 from agentic_system_lab.observability import log_agent_event
 from project4_agentic_project_copilot.app.agents import CopilotOrchestrator, FileQaAgent, SqlAgent, ToolAgent
@@ -23,6 +25,7 @@ from project4_agentic_project_copilot.app.models import (
     DocumentReference,
     DocumentListResponse,
     PendingAction,
+    ResponseTiming,
     RetrievalScope,
     RetrievalScopeResponse,
     SelectDocumentResponse,
@@ -173,6 +176,8 @@ class ProjectCopilotService:
         )
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
+        started_at = datetime.now(UTC)
+        started_monotonic = perf_counter()
         context = await self.session_store.load(request.session_id)
         append_turn(context, role="user", content=request.message)
         log_agent_event(
@@ -184,7 +189,7 @@ class ProjectCopilotService:
         )
         if request.confirm_action_id:
             response = await self._confirm_action(request, context)
-            await self._persist(request.message, response)
+            await self._persist(request.message, response, started_at, started_monotonic)
             self._log_response(request, response)
             return response
 
@@ -228,9 +233,19 @@ class ProjectCopilotService:
             except Exception as exc:
                 response = self._model_error_response(request, context, exc)
 
-        await self._persist(request.message, response)
+        await self._persist(request.message, response, started_at, started_monotonic)
         self._log_response(request, response)
         return response
+
+    def _attach_response_timing(self, response: ChatResponse, started_at: datetime, started_monotonic: float) -> None:
+        completed_at = datetime.now(UTC)
+        elapsed_ms = max(0, round((perf_counter() - started_monotonic) * 1000))
+        response.response_timing = ResponseTiming(
+            started_at=started_at,
+            completed_at=completed_at,
+            elapsed_ms=elapsed_ms,
+            note=f"Processed in {_format_elapsed(elapsed_ms)}.",
+        )
 
     def _log_response(self, request: ChatRequest, response: ChatResponse) -> None:
         log_agent_event(
@@ -245,6 +260,7 @@ class ProjectCopilotService:
                 "citation_count": len(response.citations),
                 "has_sql": bool(response.generated_sql),
                 "has_tool_call": response.tool_call is not None,
+                "elapsed_ms": response.response_timing.elapsed_ms if response.response_timing else None,
             },
         )
 
@@ -546,8 +562,15 @@ class ProjectCopilotService:
         append_turn(context, role="assistant", content=response_text)
         return ChatResponse(session_id=request.session_id, response=response_text, context=context, **kwargs)
 
-    async def _persist(self, user_message: str, response: ChatResponse) -> None:
+    async def _persist(
+        self,
+        user_message: str,
+        response: ChatResponse,
+        started_at: datetime,
+        started_monotonic: float,
+    ) -> None:
         await self.session_store.save(response.context)
+        self._attach_response_timing(response, started_at, started_monotonic)
         response.trace_id = await self.trace_store.append_response(user_message, response)
 
     def _update_context_from_tool(self, context: SessionContext, tool_call: ToolCall, result: ToolResult) -> None:
@@ -868,3 +891,9 @@ def _is_document_followup(text: str) -> bool:
 def _recent_file_context(context: SessionContext) -> bool:
     recent_text = " ".join(turn.content.lower() for turn in context.history[-6:])
     return any(term in recent_text for term in ("file", "document", "pdf", "markdown", "uploaded", "upload"))
+
+
+def _format_elapsed(elapsed_ms: int) -> str:
+    if elapsed_ms < 1000:
+        return f"{elapsed_ms} ms"
+    return f"{elapsed_ms / 1000:.1f}s"

@@ -25,7 +25,8 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     assert index.status_code == 200
     assert index.headers["cache-control"] == "no-store, max-age=0"
     assert "message-citations" in index.text
-    assert 'addMessage("assistant", data.response, responseCitations)' in index.text
+    assert "message-meta" in index.text
+    assert 'addMessage("assistant", data.response, responseCitations, data.response_timing)' in index.text
     debug = client.get("/debug")
     assert debug.status_code == 200
     assert debug.headers["cache-control"] == "no-store, max-age=0"
@@ -91,6 +92,8 @@ def test_http_app_serves_ui_and_chat_with_local_test_service(tmp_path, monkeypat
     body = chat.json()
     assert body["route"] == "file_retrieval"
     assert body["trace_id"]
+    assert body["response_timing"]["elapsed_ms"] >= 0
+    assert body["response_timing"]["note"].startswith("Processed in ")
     assert body["citations"]
     assert body["decision_log"]["retrieval_scope"] == "selected"
     assert {document["document_id"] for document in body["decision_log"]["searched_documents"]} == {

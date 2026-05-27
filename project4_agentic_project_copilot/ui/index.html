@@ -73,6 +73,11 @@
       line-height: 1.45;
     }
     .msg-text { white-space: pre-wrap; }
+    .message-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .user { align-self: flex-end; background: var(--soft); }
     .assistant { align-self: flex-start; background: #fff; }
     form {
@@ -287,13 +292,19 @@
     const scopeControl = document.getElementById("scope-control");
     const scopeButtons = Array.from(scopeControl.querySelectorAll("button[data-scope]"));
 
-    function addMessage(role, text, messageCitations = []) {
+    function addMessage(role, text, messageCitations = [], responseTiming = null) {
       const item = document.createElement("div");
       item.className = `msg ${role}`;
       const textNode = document.createElement("div");
       textNode.className = "msg-text";
       textNode.textContent = text;
       item.appendChild(textNode);
+      if (role === "assistant" && responseTiming && responseTiming.note) {
+        const meta = document.createElement("div");
+        meta.className = "message-meta";
+        meta.textContent = responseTiming.note;
+        item.appendChild(meta);
+      }
       if (role === "assistant" && messageCitations.length) {
         item.appendChild(renderCitationGroup(messageCitations));
       }
@@ -565,7 +576,7 @@
         }
         const data = await response.json();
         const responseCitations = data.citations || [];
-        addMessage("assistant", data.response, responseCitations);
+        addMessage("assistant", data.response, responseCitations, data.response_timing);
         renderContext(data.context);
         trace.textContent = data.trace_id ? `Trace: ${data.trace_id}\nOpen /debug to inspect the execution tree.` : "No trace id returned.";
         sql.textContent = data.generated_sql || "No SQL for this turn.";

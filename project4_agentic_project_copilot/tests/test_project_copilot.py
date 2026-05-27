@@ -48,6 +48,10 @@ def test_greeting_returns_without_model_call(tmp_path: Path) -> None:
 
     assert response.route == "clarify"
     assert "Upload a file" in response.response
+    assert response.response_timing is not None
+    assert response.response_timing.elapsed_ms >= 0
+    assert response.response_timing.started_at <= response.response_timing.completed_at
+    assert response.response_timing.note.startswith("Processed in ")
 
 
 def test_default_sqlite_trace_store_persists_trace_tree(tmp_path: Path) -> None:
@@ -69,6 +73,7 @@ def test_default_sqlite_trace_store_persists_trace_tree(tmp_path: Path) -> None:
     assert detail.spans[0].event_type == "user_message"
     assert detail.spans[1].actor_name == "copilot_orchestrator"
     assert detail.spans[-1].event_type == "final_response"
+    assert detail.spans[-1].metadata["response_timing"]["elapsed_ms"] >= 0
 
 
 def test_file_question_without_upload_returns_clarification_without_model_call(tmp_path: Path) -> None:
