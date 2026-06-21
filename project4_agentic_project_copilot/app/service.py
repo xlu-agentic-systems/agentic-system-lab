@@ -421,6 +421,12 @@ class ProjectCopilotService:
                 "Simple greeting handled without a model call.",
                 "Hi. Upload a file or ask me about tasks, project data, or a task action.",
             )
+        if _asks_about_session_context(text):
+            return self._answer_from_context(
+                request,
+                context,
+                "The user asked about current session context.",
+            )
         if asks_about_files(text):
             target = self.retrieval_context.resolve(context, request.message)
             if target.reason:
@@ -469,6 +475,20 @@ def _explain_rows(rows: list[dict]) -> str:
 
 def _is_greeting(text: str) -> bool:
     return text in {"hi", "hello", "hey", "hi there", "hello there"}
+
+
+def _asks_about_session_context(text: str) -> bool:
+    if "session" in text or "context" in text:
+        return any(term in text for term in ("project", "task", "document", "file", "note", "workflow"))
+    return any(
+        phrase in text
+        for phrase in (
+            "current project",
+            "current task",
+            "current note",
+            "current workflow",
+        )
+    )
 
 
 def _format_elapsed(elapsed_ms: int) -> str:

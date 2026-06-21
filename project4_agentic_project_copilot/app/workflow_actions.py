@@ -47,6 +47,7 @@ class WorkflowActionService:
         decision: OrchestratorDecision,
     ) -> ChatResponse:
         tool_call = await self.tool_agent.propose(request.message, decision, context)
+        tool_call = _complete_tool_call(tool_call, request.message, context)
         if tool_call.name in WRITE_TOOLS or tool_call.requires_confirmation:
             action_id = str(uuid.uuid4())
             pending = PendingAction(
@@ -185,7 +186,7 @@ class WorkflowActionService:
         preview: str,
     ) -> str:
         workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
-        workflow_type = _workflow_type(tool_call)
+        workflow_type = _workflow_type(tool_call, context)
         args = tool_call.args.clean()
         with self.db.connect() as conn:
             conn.execute(
@@ -283,14 +284,68 @@ class WorkflowActionService:
             context.current_note_id = int(result.result["note_id"])
 
 
-def _workflow_type(tool_call: ToolCall) -> str:
+def _workflow_type(tool_call: ToolCall, context: SessionContext) -> str:
     if tool_call.name == "create_note":
         return "capture_personal_note"
     if tool_call.name == "create_task" and (
-        tool_call.args.source_document_id or tool_call.args.note_id or tool_call.args.source_filename
+        tool_call.args.source_document_id
+        or tool_call.args.note_id
+        or tool_call.args.source_filename
+        or context.current_document_id
+        or context.current_note_id
+        or context.current_document_filename
     ):
         return "document_or_note_to_task"
     return f"{tool_call.name}_workflow"
+
+
+def _complete_tool_call(tool_call: ToolCall, message: str, context: SessionContext) -> ToolCall:
+    if tool_call.name == "create_note":
+        body = tool_call.args.body or _note_body_from_message(message) or message.strip()
+        title = tool_call.args.title or _title_from_text(body) or "Personal note"
+        args = tool_call.args.model_copy(
+            update={
+                "title": title,
+                "body": body,
+                "source_document_id": tool_call.args.source_document_id or context.current_document_id,
+                "source_filename": tool_call.args.source_filename or context.current_document_filename,
+            }
+        )
+        return tool_call.model_copy(update={"args": args})
+    if tool_call.name == "create_task":
+        args = tool_call.args.model_copy(
+            update={
+                "project_id": tool_call.args.project_id or context.current_project_id or 1,
+                "title": tool_call.args.title or _title_from_text(message) or "New task",
+                "description": tool_call.args.description or message,
+                "note_id": tool_call.args.note_id or context.current_note_id,
+                "source_document_id": tool_call.args.source_document_id or context.current_document_id,
+                "source_filename": tool_call.args.source_filename or context.current_document_filename,
+            }
+        )
+        return tool_call.model_copy(update={"args": args})
+    return tool_call
+
+
+def _note_body_from_message(message: str) -> str:
+    text = message.strip()
+    lower = text.lower()
+    for marker in (
+        "save this as a note:",
+        "save this as a note",
+        "capture a personal note that",
+        "capture note:",
+        "create note:",
+    ):
+        index = lower.find(marker)
+        if index >= 0:
+            return text[index + len(marker) :].strip(" :-'\"") or text
+    return text
+
+
+def _title_from_text(text: str) -> str:
+    words = text.strip(" .").split()
+    return " ".join(words[:8]).strip(" .")
 
 
 def _explain_tool_result(result: ToolResult) -> str:

@@ -173,10 +173,31 @@ available when a `JsonlTraceStore` is injected in tests or local harnesses.
 
 The standard eval command runs JSONL regression cases for routing, RAG,
 read-only SQL, destructive-SQL refusal, tool selection, review gates, note
-capture, and note-to-task workflow conversion:
+capture, and note-to-task workflow conversion. This default path is
+deterministic and uses the local rule-based LLM substitute:
 
 ```bash
 python3 -m project4_agentic_project_copilot.app.evaluation
+```
+
+Live OpenAI acceptance is opt-in because it uses real API calls, requires
+network access, and can incur cost. It runs the bounded smoke suite in
+`evals/openai_smoke_cases.jsonl` with `OpenAILlmClient` and
+`OpenAIEmbeddingClient`, then exits non-zero if any case fails:
+
+```bash
+OPENAI_API_KEY=... python3 -m project4_agentic_project_copilot.app.evaluation --live-openai
+```
+
+The live report must show `metadata.live=true`, `llm_provider=openai`,
+`embedding_provider=openai`, model names, and non-empty `call_count_by_task`.
+The smoke suite covers one session-context route, one uploaded-file RAG query,
+one read-only SQL count, and one review-gated write/confirmation workflow.
+
+The live pytest checks are gated separately so normal CI does not call OpenAI:
+
+```bash
+RUN_OPENAI_EVALS=1 OPENAI_API_KEY=... pytest project4_agentic_project_copilot/tests/test_openai_evaluation.py -q
 ```
 
 The same module exposes `run_goal_harness()`, which checks the specific product
@@ -196,4 +217,5 @@ claim end to end:
 pytest project4_agentic_project_copilot/tests -q
 python3 -m project4_agentic_project_copilot.app.chunking_benchmark
 python3 -m project4_agentic_project_copilot.app.evaluation
+OPENAI_API_KEY=... python3 -m project4_agentic_project_copilot.app.evaluation --live-openai
 ```

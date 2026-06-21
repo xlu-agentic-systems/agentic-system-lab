@@ -98,6 +98,29 @@ def test_file_question_without_upload_returns_clarification_without_model_call(t
     assert "Upload a markdown" in response.response
 
 
+def test_session_context_question_with_file_word_returns_context_without_model_call(tmp_path: Path) -> None:
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=FailingLlmClient(),
+        embedding_client=HashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    response = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="context-state",
+                message="What file, note, task, and workflow are currently selected in this session?",
+            )
+        )
+    )
+
+    assert response.route == "context"
+    assert response.decision_log.selected_data_source == "session_context"
+    assert "Current document: none" in response.response
+
+
 def test_model_failure_returns_graceful_chat_response(tmp_path: Path) -> None:
     copilot = ProjectCopilotService(
         db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
@@ -766,6 +789,63 @@ def test_create_personal_note_requires_confirmation_then_persists(tmp_path: Path
         {"name": "proposed_tool_action", "status": "awaiting_review"},
         {"name": "confirmed_tool_execution", "status": "completed"},
     ]
+
+
+def test_create_note_tool_call_missing_title_is_completed_before_review(tmp_path: Path) -> None:
+    class PartialNoteLlm(RuleBasedLlmClient):
+        async def parse(self, *, task_name, system_prompt, user_payload, response_model):
+            if response_model is OrchestratorDecision:
+                return OrchestratorDecision(
+                    route="api_tool",
+                    reasoning="The user wants to capture a personal note.",
+                    tool_name="create_note",
+                )
+            if response_model is ToolCall:
+                return ToolCall(
+                    name="create_note",
+                    args={"body": "Sam needs a Friday follow-up on the launch checklist."},
+                    requires_confirmation=True,
+                    reason="Creating a personal note writes durable productivity memory.",
+                )
+            return await super().parse(
+                task_name=task_name,
+                system_prompt=system_prompt,
+                user_payload=user_payload,
+                response_model=response_model,
+            )
+
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=PartialNoteLlm(),
+        embedding_client=HashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+    proposed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="partial-note",
+                message="Capture a personal note that Sam needs a Friday follow-up on the launch checklist.",
+            )
+        )
+    )
+
+    assert proposed.pending_action is not None
+    assert proposed.tool_call is not None
+    assert proposed.tool_call.args.title == "Sam needs a Friday follow-up on the launch"
+    confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="partial-note",
+                message="Confirm note",
+                confirm_action_id=proposed.pending_action.action_id,
+            )
+        )
+    )
+
+    assert confirmed.tool_result is not None
+    assert confirmed.tool_result.ok is True
+    assert confirmed.context.current_note_id is not None
 
 
 def test_note_to_followup_task_uses_reviewed_workflow_state(tmp_path: Path) -> None:
