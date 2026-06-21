@@ -791,6 +791,63 @@ def test_create_personal_note_requires_confirmation_then_persists(tmp_path: Path
     ]
 
 
+def test_create_note_tool_call_missing_title_is_completed_before_review(tmp_path: Path) -> None:
+    class PartialNoteLlm(RuleBasedLlmClient):
+        async def parse(self, *, task_name, system_prompt, user_payload, response_model):
+            if response_model is OrchestratorDecision:
+                return OrchestratorDecision(
+                    route="api_tool",
+                    reasoning="The user wants to capture a personal note.",
+                    tool_name="create_note",
+                )
+            if response_model is ToolCall:
+                return ToolCall(
+                    name="create_note",
+                    args={"body": "Sam needs a Friday follow-up on the launch checklist."},
+                    requires_confirmation=True,
+                    reason="Creating a personal note writes durable productivity memory.",
+                )
+            return await super().parse(
+                task_name=task_name,
+                system_prompt=system_prompt,
+                user_payload=user_payload,
+                response_model=response_model,
+            )
+
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=PartialNoteLlm(),
+        embedding_client=HashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+    proposed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="partial-note",
+                message="Capture a personal note that Sam needs a Friday follow-up on the launch checklist.",
+            )
+        )
+    )
+
+    assert proposed.pending_action is not None
+    assert proposed.tool_call is not None
+    assert proposed.tool_call.args.title == "Sam needs a Friday follow-up on the launch"
+    confirmed = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="partial-note",
+                message="Confirm note",
+                confirm_action_id=proposed.pending_action.action_id,
+            )
+        )
+    )
+
+    assert confirmed.tool_result is not None
+    assert confirmed.tool_result.ok is True
+    assert confirmed.context.current_note_id is not None
+
+
 def test_note_to_followup_task_uses_reviewed_workflow_state(tmp_path: Path) -> None:
     copilot = service(tmp_path)
     note_proposal = run(
