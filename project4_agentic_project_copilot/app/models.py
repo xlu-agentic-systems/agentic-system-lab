@@ -252,39 +252,4 @@ class TraceListResponse(BaseModel):
     traces: list[TraceSummary]
 
 
-class EvaluationCase(BaseModel):
-    case_id: str
-    user_query: str
-    expected_tool_choice: Route
-    expected_data_source: str
-    expected_behavior: str
-    expected_tool_name: ToolName | None = None
-    expected_sql_contains: str | None = None
-    expected_response_contains: str | None = None
-    confirm_action: bool = False
-    setup_note_title: str | None = None
-    setup_note_body: str | None = None
-    expected_workflow_status: Literal["awaiting_review", "completed", "failed"] | None = None
-
-
-class EvaluationResult(BaseModel):
-    case_id: str
-    passed: bool
-    route: Route
-    expected_route: Route
-    summary: str
-
-
-class GoalHarnessCheck(BaseModel):
-    name: str
-    passed: bool
-    summary: str
-
-
-class GoalHarnessRun(BaseModel):
-    total: int
-    passed: int
-    checks: list[GoalHarnessCheck]
-
-
 SessionContext.model_rebuild()

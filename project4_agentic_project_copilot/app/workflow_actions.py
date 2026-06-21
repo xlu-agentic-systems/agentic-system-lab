@@ -185,7 +185,7 @@ class WorkflowActionService:
         preview: str,
     ) -> str:
         workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
-        workflow_type = _workflow_type(tool_call)
+        workflow_type = _workflow_type(tool_call, context)
         args = tool_call.args.clean()
         with self.db.connect() as conn:
             conn.execute(
@@ -283,11 +283,16 @@ class WorkflowActionService:
             context.current_note_id = int(result.result["note_id"])
 
 
-def _workflow_type(tool_call: ToolCall) -> str:
+def _workflow_type(tool_call: ToolCall, context: SessionContext) -> str:
     if tool_call.name == "create_note":
         return "capture_personal_note"
     if tool_call.name == "create_task" and (
-        tool_call.args.source_document_id or tool_call.args.note_id or tool_call.args.source_filename
+        tool_call.args.source_document_id
+        or tool_call.args.note_id
+        or tool_call.args.source_filename
+        or context.current_document_id
+        or context.current_note_id
+        or context.current_document_filename
     ):
         return "document_or_note_to_task"
     return f"{tool_call.name}_workflow"

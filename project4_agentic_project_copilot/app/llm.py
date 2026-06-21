@@ -345,7 +345,16 @@ def _task_description(message: str, context: dict) -> str:
 
 
 def _search_query(message: str) -> str:
-    for marker in ("search tasks for", "find tasks for", "search tasks", "find tasks"):
+    for marker in (
+        "search tasks for",
+        "find tasks for",
+        "search notes for",
+        "find notes for",
+        "search tasks",
+        "find tasks",
+        "search notes",
+        "find notes",
+    ):
         value = _title_after(message, marker)
         if value:
             return value

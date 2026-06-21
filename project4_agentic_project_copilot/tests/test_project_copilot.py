@@ -98,6 +98,29 @@ def test_file_question_without_upload_returns_clarification_without_model_call(t
     assert "Upload a markdown" in response.response
 
 
+def test_session_context_question_with_file_word_returns_context_without_model_call(tmp_path: Path) -> None:
+    copilot = ProjectCopilotService(
+        db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
+        llm_client=FailingLlmClient(),
+        embedding_client=HashEmbeddingClient(),
+        session_store=JsonSessionStore(tmp_path / "sessions.json"),
+        trace_store=JsonlTraceStore(tmp_path / "traces.jsonl"),
+    )
+
+    response = run(
+        copilot.chat(
+            ChatRequest(
+                session_id="context-state",
+                message="What file, note, task, and workflow are currently selected in this session?",
+            )
+        )
+    )
+
+    assert response.route == "context"
+    assert response.decision_log.selected_data_source == "session_context"
+    assert "Current document: none" in response.response
+
+
 def test_model_failure_returns_graceful_chat_response(tmp_path: Path) -> None:
     copilot = ProjectCopilotService(
         db=CopilotDatabase(tmp_path / "copilot.sqlite3"),
